@@ -11,6 +11,7 @@ local Options = require "core.options"
 local UITheme = require "core.ui_theme"
 local i18n    = require "core.i18n"
 local Audio   = require "core.audio_manager"
+local Save    = require "core.save_system"
 local ManageScene = require "scene.manage_scene"
 
 -- State global
@@ -68,6 +69,9 @@ function love.load()
 end
 
 function love.update(dt)
+    -- Global UI animation timer (dipakai untuk shimmer/pulse di semua state)
+    if UITheme.update then UITheme.update(dt) end
+
     if game_state == "menu" then
         Menu.update(dt)
     elseif game_state == "options" then
@@ -124,6 +128,29 @@ function love.update(dt)
                 Game.set_scene_outcome(outcome)
             end)
         end
+    end
+end
+
+-- Helper: handle shortcut menu dari keyboard
+local function menu_action(action)
+    if action == "play" then
+        ManageScene.reset()
+        Game.load()
+        game_state = "scene"
+        ManageScene.trigger_entry_story(function()
+            ManageScene.trigger_friend_gift(function()
+                Game.gift_starting_seeds()
+                game_state = "game"
+            end)
+        end)
+    elseif action == "continue" then
+        game_state = "game"
+        Game.load_from_save()
+    elseif action == "settings" then
+        game_state = "options"
+        Options.load()
+    elseif action == "exit" then
+        love.event.quit()
     end
 end
 
@@ -195,8 +222,17 @@ end
 
 function love.keypressed(key)
     if game_state == "menu" then
-        if key == "escape" then
+        if key == "escape" or key == "x" then
             love.event.quit()
+        elseif key == "1" then
+            menu_action("play")
+        elseif key == "2" then
+            menu_action("settings")
+        elseif key == "c" then
+            -- Continue (kalau ada save)
+            if Save and Save.exists and Save.exists() then
+                menu_action("continue")
+            end
         end
     elseif game_state == "options" then
         local action = Options.keypressed(key)
@@ -225,6 +261,9 @@ end
 -- WINDOW RESIZE (biar UI adaptive)
 -- ==========================================
 function love.resize(w, h)
+    -- Reset cloud & particle posisi supaya tetap cocok setelah resize
+    if UITheme.resize_bg then UITheme.resize_bg(w, h) end
+    if UITheme.resize_particles then UITheme.resize_particles(w, h) end
     if game_state == "menu" then
         Menu.load()
     elseif game_state == "options" then
