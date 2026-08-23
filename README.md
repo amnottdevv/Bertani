@@ -264,7 +264,3 @@ The graphics assets used in this game are licensed for non-commercial use only b
 If you have paid money to obtain this game, you have been scammed. Please report the seller and obtain a free copy from the official [Releases page](../../releases).
 
 ---
-
-*Bertani v2.0 · A non-commercial farming narrative · Built with LÖVE 2D*
-
-Itu isi lengkap README.md-nya. Tinggal copy-paste ke file `README.md` di repo GitHub kamu. Mau saya tulis juga file lain (`ASSETS_README.md`, `LICENSE`, `CREDITS.txt`, `RELEASE_NOTES_v2.0.md`) di sini?
