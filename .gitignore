@@ -1,0 +1,13 @@
+# —— Aset berlisensi non-redistributable ——
+# gfx/ hanya didapat sendiri (lihat ASSETS_README.md). JANGAN di-push ke GitHub.
+gfx/
+
+# —— Artefak build & rilis (khusus lokal) ——
+out/
+release/
+*.love
+*.zip
+
+# —— Sampah sistem ——
+.DS_Store
+Thumbs.db

@@ -115,6 +115,7 @@ local translations = {
         -- Scene / Dialog cerita
         ["scene.continue_hint"] = "Klik / Space untuk lanjut",
         ["scene.skip_hint"]     = "ESC untuk lewati",
+        ["scene.choice_hint"]   = "Klik, atau panah + Enter",   -- fix bug #12
         ["scene.entry.title"]   = "Awal Mula",
 
         -- Entry story (Mira vs Leo)
@@ -221,6 +222,104 @@ local translations = {
 
         ["notif.true_ending"]   = "TRUE ENDING: Leo memilih kedamaian.",
         ["notif.good_ending"]   = "GOOD ENDING: Leo menuntaskan balas dendam.",
+
+        -- v2.2: Chapter Select
+        ["chapter.title"]      = "Pilih Chapter",
+        ["chapter.subtitle"]   = "Pilih cerita yang ingin kamu mainkan",
+        ["chapter.back"]        = "Kembali",
+        ["chapter.1.title"]    = "Awal",
+        ["chapter.1.desc"]     = "Mira pergi. Leo mulai bertani.",
+        ["chapter.2.title"]    = "Investor",
+        ["chapter.2.desc"]     = "Seseorang menawarkan modal. Harganya tidak murah.",
+        ["chapter.3.title"]    = "Belum Tersedia",
+        ["chapter.3.desc"]     = "Coming soon",
+        ["chapter.4.title"]    = "Belum Tersedia",
+        ["chapter.4.desc"]     = "Coming soon",
+        ["chapter.5.title"]    = "Belum Tersedia",
+        ["chapter.5.desc"]     = "Coming soon",
+
+        -- v2.2: Chapter 2 Intro (Leo + Andri soal investasi)
+        ["ch2intro.line1"]     = "Leo, ladangmu sudah lumayan rapi. Tapi kamu butuh modal lebih.",
+        ["ch2intro.line2"]     = "Aku tahu. Tapi aku gak punya simpanan.",
+        ["ch2intro.line3"]     = "Ada satu orang. Biarawan di gereja sebelah timur.",
+        ["ch2intro.line4"]     = "Biarawan? Sejak kapan biarawan kasih pinjaman?",
+        ["ch2intro.line5"]     = "Dia bukan biarawan biasa. Orang-orang bilang dia punya uang banyak.",
+        ["ch2intro.line6"]     = "Dari mana dia dapat uangnya?",
+        ["ch2intro.line7"]     = "Gak ada yang t pasti. Tapi yang minjam darinya... biasanya balik.",
+        ["ch2intro.line8"]     = "Biasanya?",
+        ["ch2intro.line9"]     = "Leo, aku cuma kasih tau. Keputusan tetap di kamu.",
+        ["ch2intro.line10"]    = "Aku akan lihat dulu. Terima kasih, Andri.",
+
+        -- v2.2: Chapter 2 Monk (dialog Leo + Monk, dark tone)
+        ["ch2monk.monk.name"]  = "Biarawan",
+        ["ch2monk.line1"]      = "Kamu datang untuk uang.",
+        ["ch2monk.line2"]      = "Andri yang bilang. Saya Leo.",
+        ["ch2monk.line3"]      = "Aku tahu siapa kamu. Ladangmu kecil, tapi kamu rajin.",
+        ["ch2monk.line4"]      = "Berapa yang bisa Anda pinjamkan?",
+        ["ch2monk.line5"]      = "Cukup untuk perluas ladangmu tiga kali lipat. Benih, alat, air.",
+        ["ch2monk.line6"]      = "Apa syaratnya?",
+        ["ch2monk.line7"]      = "Setiap panen, sepertiga hasilnya untukku. Selamanya.",
+        ["ch2monk.line8"]      = "Selamanya...",
+        ["ch2monk.choice_prompt"] = "Leo harus memutuskan...",
+        ["ch2monk.choice_accept"] = "Terima tawaran",
+        ["ch2monk.choice_refuse"] = "Tolak",
+
+        ["chapter.2.start_notif"] = "Chapter 2 dimulai. Ke kanan layar untuk temui Biarawan.",
+        ["chapter.2.monk_deal"]   = "Kesepakatan terjalin. Sesuatu berubah di ladangmu.",
+        ["chapter.2.monk_refuse"] = "Kamu menolak tawarannya. Biarawan itu hanya tersenyum: 'Kau akan kembali.'",
+        ["chapter.2.strange_path"]  = "Ada jalur baru terbuka di utara ladang...",
+        ["chapter.2.plants_wilted"] = "Tanamanmu layu. Sesuatu tidak beres.",
+        ["chapter.2.payment_done"] = "Biksul udah ambil bagiannya. Ladang ini... bukan milikmu sepenuhnya.",
+
+        -- v2.3: Stage 2 — notifikasi hasil pilihan CEK/ENGGA
+        ["chapter.2.path_cek"]   = "Kau melihatnya. Sesuatu ikut keluar dari kegelapan. ({n} tanaman hilang)",
+        ["chapter.2.path_engga"] = "Kau memilih tidak melihat. Tapi suara itu makin dekat.",
+
+        -- v2.3: Stage 4 — pencurian tanaman (Jalur B / TOLAK monk)
+        ["chapter.2.theft"] = "{n} tanamanmu lenyap. Sesuatu berlari menjauh dari kebun — kejar!",
+        -- v2.3: Stage 4 — penutup chapter setelah keluar zona bahaya
+        ["chapter.2.done"]  = "Chapter 2 selesai. Zona bahaya tetap terbuka di ujung jalur utara.",
+
+        -- v2.3: Stage 2 — dialog di ujung jalur utara (scene 08)
+        ["pathchoice.line1"] = "Langkahmu berhenti di ujung jalur. Udara di sini lebih dingin dari kebun.",
+        ["pathchoice.line2"] = "Dari balik kegelapan terdengar suara—pelan, seperti napas yang tertahan. Mendekat untuk melihatnya?",
+        ["pathchoice.cek"]   = "CEK",
+        ["pathchoice.engga"] = "ENGGA",
+
+        -- v2.3: Stage 3 — kejar-kejaran (core/chase_sequence.lua)
+        -- Catatan: font game tidak punya glif panah (↑↓ ← →) — kalau ikut
+        -- ditulis, yang muncul kotak kosong. Tulis nama tombolnya saja.
+        ["chase.hint_cek"]      = "MAJU (W) = lari menjauh, tapi zona memakan · MUNDUR (S) = mundur ke kegelapan",
+        ["chase.hint_engga"]    = "Kau tidak bisa bergerak. Monster itu datang sendiri.",
+        ["chase.hint_kejar"]    = "MAJU (W) = kejar monster itu · DIAM/MUNDUR = kegelapan di belakang menyusul",
+        ["chase.hp"]            = "NYAWA",
+        ["chase.caught"]        = "KAMU KETANGKEP",
+        ["chase.caught_zone"]   = "Zona memakannya dari depan.",
+        ["chase.caught_dark"]   = "Kegelapan di belakangnya menyentuh.",
+        ["chase.caught_monster"]= "Monster itu menyentuhnya.",
+        ["chapter.2.caught"]    = "Kamu ketangkep. Sesuatu menarikmu ke arah zona bahaya...",
+
+        -- v2.3: Stage 4 — zona bahaya / layar akhir chapter
+        -- (core/danger_zone.lua; isi narasi dibedakan per rute)
+        ["zone.title"]   = "ZONA BAHAYA",
+        ["zone.open"]    = "Kegelapan tidak membiarkanmu pergi. Ia membawamu ke tempat yang tidak ada di peta kebunmu — dan berhenti mengejar.",
+        ["zone.cek"]     = "Kau melihatnya. Sesuatu dari balik jalur utara ikut keluar, dan kini ia tahu wajahmu. Itu satu-satunya yang kau dapat hari ini.",
+        ["zone.engga"]   = "Kau memilih tidak melihat. Tapi suara itu tetap menghitung langkahmu — dan kini ia berdiri tepat di belakangmu.",
+        ["zone.tolak"]   = "Kau mengejar, tapi yang hilang bukan cuma tanamanmu. Kegelapan menagih janji yang belum pernah kau buat.",
+        ["zone.closing"] = "— CHAPTER 2 SELESAI —",
+        ["zone.hint"]    = "[SPACE] Lanjut",
+
+        -- v2.2: Chapter 2 Payment (dialog scene 07)
+        ["ch2pay.line1"]     = "Waktumu sudah tiba.",
+        ["ch2pay.line2"]     = "Buat apa?",
+        ["ch2pay.line3"]     = "Panen pertamamu sukses. Sepertiga hasilnya, seperti yang kita sepakati.",
+        ["ch2pay.line4"]     = "Saya ingat. Ambil saja.",
+        ["ch2pay.line5"]     = "Sabar. Ada yang harus kamu tahu.",
+        ["ch2pay.line6"]     = "Apa?",
+        ["ch2pay.line7"]     = "Tanah ini bukan milik siapa pun. Ia hanya menunggu. Orang-orang sebelummu juga yakin ladang ini milik mereka.",
+        ["ch2pay.line8"]     = "Orang sebelum saya?",
+        ["ch2pay.line9"]     = "Mereka hilang. Tapi ladang tetap ada. Panen lagi. Jangan lupa bagianmu untukku.",
+        ["ch2pay.line10"]    = "...Aku mengerti.",
     },
 
     en = {
@@ -314,6 +413,7 @@ local translations = {
         -- Scene / Story dialog
         ["scene.continue_hint"] = "Click / Space to continue",
         ["scene.skip_hint"]     = "ESC to skip",
+        ["scene.choice_hint"]   = "Click, arrows + Enter",   -- fix bug #12
         ["scene.entry.title"]   = "The Beginning",
 
         -- Entry story (Mira vs Leo)
@@ -420,6 +520,102 @@ local translations = {
 
         ["notif.true_ending"]   = "TRUE ENDING: Leo chose peace.",
         ["notif.good_ending"]   = "GOOD ENDING: Leo settled the score.",
+
+        -- v2.2: Chapter Select
+        ["chapter.title"]      = "Select Chapter",
+        ["chapter.subtitle"]   = "Choose which story to play",
+        ["chapter.back"]        = "Back",
+        ["chapter.1.title"]    = "Beginning",
+        ["chapter.1.desc"]     = "Mira leaves. Leo starts farming.",
+        ["chapter.2.title"]    = "The Investor",
+        ["chapter.2.desc"]     = "Someone offers capital. The price is not cheap.",
+        ["chapter.3.title"]    = "Not Available",
+        ["chapter.3.desc"]     = "Coming soon",
+        ["chapter.4.title"]    = "Not Available",
+        ["chapter.4.desc"]     = "Coming soon",
+        ["chapter.5.title"]    = "Not Available",
+        ["chapter.5.desc"]     = "Coming soon",
+
+        -- v2.2: Chapter 2 Intro (Leo + Andri about investment)
+        ["ch2intro.line1"]     = "Leo, your farm looks tidy. But you need more capital.",
+        ["ch2intro.line2"]     = "I know. But I don't have savings.",
+        ["ch2intro.line3"]     = "There's someone. A monk at the church east of here.",
+        ["ch2intro.line4"]     = "A monk? Since when do monks lend money?",
+        ["ch2intro.line5"]     = "He's not an ordinary monk. People say he has a lot of money.",
+        ["ch2intro.line6"]     = "Where does he get it from?",
+        ["ch2intro.line7"]     = "Nobody knows for sure. But those who borrow... usually come back.",
+        ["ch2intro.line8"]     = "Usually?",
+        ["ch2intro.line9"]     = "Leo, I'm just telling you. The choice is yours.",
+        ["ch2intro.line10"]    = "I'll go see. Thanks, Andri.",
+
+        -- v2.2: Chapter 2 Monk (dialog Leo + Monk, dark tone)
+        ["ch2monk.monk.name"]  = "The Monk",
+        ["ch2monk.line1"]      = "You came for money.",
+        ["ch2monk.line2"]      = "Andri told me. I'm Leo.",
+        ["ch2monk.line3"]      = "I know who you are. Your farm is small, but you work hard.",
+        ["ch2monk.line4"]      = "How much can you lend?",
+        ["ch2monk.line5"]      = "Enough to triple your land. Seeds, tools, water.",
+        ["ch2monk.line6"]      = "What's the catch?",
+        ["ch2monk.line7"]      = "Every harvest, one third comes to me. Forever.",
+        ["ch2monk.line8"]      = "Forever...",
+        ["ch2monk.choice_prompt"] = "Leo must decide...",
+        ["ch2monk.choice_accept"] = "Accept the deal",
+        ["ch2monk.choice_refuse"] = "Refuse",
+
+        ["chapter.2.start_notif"] = "Chapter 2 begins. Go right to meet the Monk.",
+        ["chapter.2.monk_deal"]   = "A deal is struck. Something changes in your farm.",
+        ["chapter.2.monk_refuse"] = "You refused his offer. The monk only smiled: 'You will come back.'",
+        ["chapter.2.strange_path"]  = "A new path has opened north of your farm...",
+        ["chapter.2.plants_wilted"] = "Your plants are withering. Something is wrong.",
+        ["chapter.2.payment_done"] = "The Monk took his share. This land... is not entirely yours.",
+
+        -- v2.3: Stage 2 — notifications for the CHECK/NOPE choice
+        ["chapter.2.path_cek"]   = "You saw it. Something followed you out of the dark. ({n} plants lost)",
+        ["chapter.2.path_engga"] = "You chose not to look. But the sound is getting closer.",
+
+        -- v2.3: Stage 4 — plant theft (Route B / REFUSE the monk)
+        ["chapter.2.theft"] = "{n} of your plants vanished. Something is running away from the farm — chase it!",
+        -- v2.3: Stage 4 — chapter closing after leaving the danger zone
+        ["chapter.2.done"]  = "Chapter 2 complete. The danger zone stays open at the end of the north path.",
+
+        -- v2.3: Stage 2 — dialog at the end of the north path (scene 08)
+        ["pathchoice.line1"] = "You stop at the end of the path. The air here is colder than the garden.",
+        ["pathchoice.line2"] = "From beyond the dark comes a sound—slow, like a held breath. Move closer to look?",
+        ["pathchoice.cek"]   = "CHECK",
+        ["pathchoice.engga"] = "NOPE",
+
+        -- v2.3: Stage 3 — chase (core/chase_sequence.lua)
+        ["chase.hint_cek"]      = "FORWARD (W) = run away, but the zone eats you · BACK (S) = retreat into the dark",
+        ["chase.hint_engga"]    = "You cannot move. The monster comes to you.",
+        ["chase.hint_kejar"]    = "FORWARD (W) = chase that thing · STILL/BACK = the dark behind you is closing in",
+        ["chase.hp"]            = "LIFE",
+        ["chase.caught"]        = "YOU ARE CAUGHT",
+        ["chase.caught_zone"]   = "The zone ate you from the front.",
+        ["chase.caught_dark"]   = "The darkness behind you touched you.",
+        ["chase.caught_monster"]= "The monster touched you.",
+        ["chapter.2.caught"]    = "You are caught. Something drags you toward the danger zone...",
+
+        -- v2.3: Stage 4 — danger zone / end-of-chapter card
+        -- (core/danger_zone.lua; narration differs per route)
+        ["zone.title"]   = "THE DANGER ZONE",
+        ["zone.open"]    = "The darkness did not let you leave. It brought you to a place that is not on your farm's map — and stopped chasing.",
+        ["zone.cek"]     = "You saw it. Something from beyond the north path followed you out, and now it knows your face. That is all you gained today.",
+        ["zone.engga"]   = "You chose not to look. But the sound is still counting your steps — and now it stands right behind you.",
+        ["zone.tolak"]   = "You gave chase, but your plants were not the only thing lost. The darkness is collecting a promise you never made.",
+        ["zone.closing"] = "— CHAPTER 2 COMPLETE —",
+        ["zone.hint"]    = "[SPACE] Continue",
+
+        -- v2.2: Chapter 2 Payment (dialog scene 07)
+        ["ch2pay.line1"]     = "Your time has come.",
+        ["ch2pay.line2"]     = "For what?",
+        ["ch2pay.line3"]     = "Your first harvest was a success. One third of it, as we agreed.",
+        ["ch2pay.line4"]     = "I remember. Take it.",
+        ["ch2pay.line5"]     = "Wait. There is something you must know.",
+        ["ch2pay.line6"]     = "What?",
+        ["ch2pay.line7"]     = "This land belongs to no one. It only waits. The people before you also believed this farm was theirs.",
+        ["ch2pay.line8"]     = "People before me?",
+        ["ch2pay.line9"]     = "They are gone. But the land remains. Harvest again. Do not forget my share.",
+        ["ch2pay.line10"]    = "...I understand.",
     },
 }
 

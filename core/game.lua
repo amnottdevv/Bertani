@@ -44,6 +44,19 @@ local water_sheet_img, water_frames   -- ANIMASI BARU: siram
 local grass_img, grass_quads
 local fence_img, fence_quad
 
+-- v2.2: Chapter 2 — church, peasantly home, monk NPC sprites
+local church_img, peasantly_home_img
+local monk_img, monk_quad
+local chapter2_npcs = {}   -- daftar NPC monk yang bisa di-interact
+
+-- v2.2: MULTIPLE MAPS — farm ↔ village
+local current_map = "farm"   -- "farm" atau "village"
+local saved_player_pos = { farm = nil, village = nil }
+local village_path_tiles = {}   -- jalan tanah di village
+local village_path_tiles_array = {}  -- fix bug 12: dulu gak ada `local`,
+                                     -- jadi bocor jadi variabel global _G
+local village_buildings = {}    -- daftar building di village
+
 -- Inventory (sekarang pakai modul Inventory)
 local inventory
 
@@ -64,6 +77,142 @@ local notification = { text = "", timer = 0 }
 local active_tool = "hoe"
 
 -- ==========================================
+-- v2.2 Stage 1: EFEK PASCA-DEAL MONK
+-- ==========================================
+-- Dijalankan setelah player memilih "Terima" tawaran biarawan (lihat
+-- Game.apply_monk_choice). Timeline (detik sejak deal):
+--   +0    suara aneh (creepy.wav) + notifikasi deal
+--   +6    jalur utara muncul (path_open) + notifikasi
+--   +12   tanaman mulai layu (wilt 0 -> 1 selama 45 detik)
+--   +57   layu penuh + notifikasi tanaman layu
+-- State ini ikut tersimpan ke save (pelajaran bug 6: state dunia jangan
+-- sampai hilang saat Continue).
+local strange = {
+    active        = false,
+    timer         = 0,
+    wilt          = 0,      -- 0..1 (0 = sehat, 1 = layu penuh)
+    path_open     = false,
+    sfx_wilt_done = false,
+    sfx_dead_done = false,
+}
+local STRANGE_PATH_AT    = 6
+local STRANGE_WILT_START = 12
+local STRANGE_WILT_DUR   = 45
+-- Stage 2 (pilihan CEK/ENGGA): berapa tanaman yang hilang kalau player
+-- memilih CEK. ENGGA = 0 (beda hasil, bukan beda layar — lihat desain §1).
+local PATH_CHOICE_PLANT_LOSS = 2
+
+-- ==========================================
+-- v2.3 Stage 4: PENCURIAN (Jalur B — TOLAK)
+-- ==========================================
+-- Dijalankan setelah player memilih "Tolak" tawaran biarawan (lihat
+-- Game.apply_monk_choice): monster mencuri tanaman beberapa saat kemudian,
+-- lalu player mengejar (chase mode "kejar") -> ketangkep -> zona bahaya.
+-- Timeline: +45 dtk setelah scene Tolak selesai (desain §1 jalur B).
+-- State ikut tersimpan ke save (pelajaran bug 6 & Stage 1).
+local theft = { active = false, timer = 0, done = false }
+local THEFT_AT          = 45
+local THEFT_PLANT_LOSS  = 2
+
+local function reset_theft()
+    theft.active = false
+    theft.timer  = 0
+    theft.done   = false
+end
+
+-- Mulai timeline pencurian (dipanggil dari apply_monk_choice "refuse").
+function Game.start_theft_event()
+    reset_theft()
+    theft.active = true
+end
+
+-- Snapshot state untuk test & debug console.
+function Game.get_theft_state()
+    return { active = theft.active, timer = theft.timer, done = theft.done }
+end
+
+local function reset_strange()
+    strange.active        = false
+    strange.timer         = 0
+    strange.wilt          = 0
+    strange.path_open     = false
+    strange.sfx_wilt_done = false
+    strange.sfx_dead_done = false
+end
+
+-- Mulai efek (dipanggil dari apply_monk_choice / debug console).
+function Game.start_strange_event()
+    reset_strange()
+    strange.active = true
+end
+
+-- Rect jalur utara (Stage 1) dalam koordinat layar, atau nil kalau
+-- jalur belum terbuka / bukan di map farm.
+-- Dipakai oleh: gambar jalur (Game.draw) dan trigger Stage 2
+-- (player sampai ujung jalur -> pilihan CEK/ENGGA).
+function Game.get_north_path_rect()
+    if not strange.path_open or current_map ~= "farm" then return nil end
+    local ts = tile_size
+    local ccol = farm_rect.x + math.floor(farm_rect.w / 2)
+    return {
+        x = (ccol - 2) * ts,             -- 3 tile: ccol-1, ccol, ccol+1
+        y = 0,
+        w = ts * 3,
+        h = (farm_rect.y + 1) * ts,      -- menjorok 1 tile ke dalam ladang
+    }
+end
+
+-- Snapshot state untuk test & debug console.
+function Game.get_strange_state()
+    return {
+        active    = strange.active,
+        timer     = strange.timer,
+        wilt      = strange.wilt,
+        path_open = strange.path_open,
+    }
+end
+
+local function update_strange(dt)
+    if not strange.active then return end
+    strange.timer = strange.timer + dt
+
+    -- Jalur utara muncul
+    if not strange.path_open and strange.timer >= STRANGE_PATH_AT then
+        strange.path_open = true
+        Game.set_notification(i18n.t("chapter.2.strange_path"), 5)
+        if _G.play_sfx then _G.play_sfx("creepy") end
+    end
+
+    -- Tanaman mulai layu
+    local w = (strange.timer - STRANGE_WILT_START) / STRANGE_WILT_DUR
+    strange.wilt = math.max(0, math.min(1, w))
+
+    if not strange.sfx_wilt_done and strange.wilt >= 0.35 then
+        strange.sfx_wilt_done = true
+        if _G.play_sfx then _G.play_sfx("wilt") end
+    end
+    if not strange.sfx_dead_done and strange.wilt >= 1 then
+        strange.sfx_dead_done = true
+        Game.set_notification(i18n.t("chapter.2.plants_wilted"), 5)
+        if _G.play_sfx then _G.play_sfx("wilt") end
+    end
+end
+
+-- Untuk debug console: lompat ke kondisi tertentu tanpa nunggu timer.
+--   preset = "path"  -> jalur utara langsung terbuka
+--   preset = "wilt"  -> tanaman langsung layu penuh
+--   preset lain      -> efek baru mulai dari nol
+function Game.debug_strange(preset)
+    Game.start_strange_event()
+    if preset == "path" then
+        strange.timer = STRANGE_PATH_AT + 1
+    elseif preset == "wilt" then
+        strange.timer = STRANGE_WILT_START + STRANGE_WILT_DUR
+    end
+    update_strange(0)   -- terapkan milestone sekarang juga
+end
+
+-- ==========================================
 -- FUNGSI BANTU GLOBAL (dipanggil dari modul UI lain)
 -- ==========================================
 
@@ -71,6 +220,60 @@ function Game.set_notification(text, duration)
     notification.text = text
     notification.timer = duration or 2
     notification.max_life = duration or 2
+end
+
+-- v2.3 Stage 3: HUD chase perlu menampilkan notifikasi yang sedang tampil
+-- (mis. "{n} tanaman hilang" dari pilihan CEK). Selama state "danger",
+-- Game.update tidak dipanggil jadi timer notifikasi membeku — penerima
+-- boleh membaca nilainya apa adanya untuk keperluan fade sendiri.
+-- Mengembalikan salinan, bukan tabel internal.
+function Game.get_notification()
+    return {
+        text     = notification.text,
+        timer    = notification.timer,
+        max_life = notification.max_life or 2,
+    }
+end
+
+-- Gambar panel notifikasi. Dipakai HUD game (slide-in + fade dari sisa
+-- waktu) dan HUD chase Stage 3 (fade dari waktu chase, posisi atas-tengah).
+--   y_base : posisi Y dasar panel sebelum slide-in
+--   slide  : 0..1 — 0 = belum masuk layar, 1 = sudah di posisi
+--   fade   : 0..1 — opasitas
+-- Tinggi panel ikut jumlah baris teks: pesan panjang seperti
+-- chapter.2.path_cek (2 baris) dulu meluber keluar kotak tetap 56 px.
+function Game.draw_notification(y_base, slide, fade)
+    if not notification.text or notification.text == "" then return end
+    if not fade or fade <= 0 then return end
+
+    local sw   = love.graphics.getWidth()
+    local font = UITheme.get_font(26)
+    -- LÖVE 11: getWrap mengembalikan (lebar_baris_maks, fragments) —
+    -- jumlah barisnya ada di #fragments (sama dengan hasil bungkus printf)
+    local _, fragments = font:getWrap(notification.text, 440)
+    local nlines = 1
+    if type(fragments) == "table" and #fragments > 0 then
+        nlines = #fragments
+    end
+    local lh = font:getHeight()
+
+    local box_w = 480
+    local box_h = 56 + (nlines - 1) * lh
+    local bx = sw / 2 - box_w / 2
+    local by = y_base + (1 - (slide or 1)) * -40
+
+    UITheme.draw_panel(bx, by, box_w, box_h,
+        { fill = {0, 0, 0, 0.88 * fade}, border = 2, shadow = false })
+    UITheme.draw_corner_brackets(bx - 2, by - 2, box_w + 4, box_h + 4,
+        { color = { UITheme.colors.accent[1], UITheme.colors.accent[2],
+                    UITheme.colors.accent[3], 0.85 * fade },
+          size = 10, thick = 2 })
+
+    love.graphics.setColor(1, 1, 1, fade)
+    love.graphics.setFont(font)
+    love.graphics.printf(notification.text, sw / 2 - 220,
+                         by + (box_h - nlines * lh) / 2, 440, "center")
+    love.graphics.setColor(1, 1, 1, 1)
 end
 
 function Game.update_player_money(new_money)
@@ -134,6 +337,13 @@ function Game.load()
     fence_img = love.graphics.newImage("gfx/tiles/fence_01_16x16.png")
     fence_quad = love.graphics.newQuad(0, 0, 16, 16, fence_img:getDimensions())
 
+    -- === v2.2: CHAPTER 2 ASSETS ===
+    church_img = love.graphics.newImage("gfx/buildings/church.png")
+    peasantly_home_img = love.graphics.newImage("gfx/buildings/peasantly_home.png")
+    monk_img = love.graphics.newImage("gfx/characters/monks.png")
+    -- Ambil cell (0,0) = front view large monk
+    monk_quad = love.graphics.newQuad(0, 0, 32, 32, monk_img:getDimensions())
+
     -- Map lantai (penuh layar)
     local sw, sh = love.graphics.getWidth(), love.graphics.getHeight()
     local cols = math.ceil(sw / tile_size)
@@ -158,6 +368,70 @@ function Game.load()
     -- === DEKORASI DUNIA v2.2 ===
     -- Build scatter bunga/batu/semak/jamur/tallgrass/pohon + jalanan tanah
     WorldDecor.init(sw, sh, farm_rect, tile_size)
+
+    -- === v2.2: MULTIPLE MAPS — init state ===
+    current_map = "farm"
+    -- Efek pasca-deal monk ikut di-reset saat load baru / continue default
+    reset_strange()
+    -- v2.3 Stage 4: timeline pencurian (Jalur B) juga ikut di-reset
+    reset_theft()
+    saved_player_pos = { farm = nil, village = nil }
+
+    -- === v2.2: VILLAGE BUILDINGS & NPC (di map village, bukan farm) ===
+    -- Church di pojok kanan-atas
+    village_buildings = {
+        {
+            type = "church",
+            img = church_img,
+            x = sw - 140,        -- posisi kiri-atas
+            y = 40,
+            w = 120,             -- 200 * 0.6
+            h = 224,             -- 373 * 0.6
+            shadow_offset_y = -8, -- fix bug 4: shadow lebih dekat ke base
+        },
+        {
+            type = "home",
+            img = peasantly_home_img,
+            x = sw - 320,
+            y = 380,
+            w = 121,             -- 173 * 0.7
+            h = 106,             -- 152 * 0.7
+            shadow_offset_y = -4,
+        },
+        {
+            type = "home",
+            img = peasantly_home_img,
+            x = 80,
+            y = 380,
+            w = 121,
+            h = 106,
+            shadow_offset_y = -4,
+        },
+    }
+
+    -- NPC Monk di depan church (di map village)
+    chapter2_npcs = {
+        {
+            x = sw - 200,
+            y = 320,
+            w = 64,   -- 32 * 2 (scale 2x)
+            h = 64,
+            sprite = monk_img,
+            quad = monk_quad,
+            label = "Monk",
+            interact_range = 100,
+        },
+    }
+
+    -- Jalan tanah horizontal di village (dari kiri ke kanan, di tengah layar)
+    -- v2.2: pre-compute array supaya draw tidak pakai pairs()
+    village_path_tiles = {}
+    village_path_tiles_array = {}
+    local path_y = math.floor(sh / 2 / tile_size)
+    for x = 1, math.ceil(sw / tile_size) do
+        village_path_tiles[x .. "," .. path_y] = "h"
+        table.insert(village_path_tiles_array, { col = x, row = path_y })
+    end
 
     -- === SHEET KARAKTER ===
     -- Walk
@@ -239,6 +513,38 @@ function Game.load()
 end
 
 -- ==========================================
+-- HELPER: REBUILD TILE FARM
+-- ==========================================
+-- Hitung ulang tile_map & grass_variation mengikuti farm_rect yang sekarang.
+-- Dipakai saat farm diperluas (quest monk) dan saat load save yang menyimpan
+-- farm_rect lebih besar dari default 4x3.
+local function rebuild_farm_tiles()
+    local sw, sh = love.graphics.getWidth(), love.graphics.getHeight()
+    local cols = math.ceil(sw / tile_size)
+    local rows = math.ceil(sh / tile_size)
+    -- pakai rows terbesar supaya baris lama (stale) ikut dibersihkan
+    if #tile_map > rows then rows = #tile_map end
+    for y = 1, rows do
+        if not tile_map[y] then tile_map[y] = {} end
+        if not grass_variation[y] then grass_variation[y] = {} end
+        for x = 1, cols do
+            local in_farm = (x >= farm_rect.x and x < farm_rect.x + farm_rect.w and
+                             y >= farm_rect.y and y < farm_rect.y + farm_rect.h)
+            if in_farm then
+                tile_map[y][x] = 1
+                if (grass_variation[y][x] or 0) == 0 then
+                    grass_variation[y][x] = love.math.random(1, 4)
+                end
+            else
+                -- clear stale farm tiles (jika farm pernah shrink/move)
+                tile_map[y][x] = 0
+                grass_variation[y][x] = 0
+            end
+        end
+    end
+end
+
+-- ==========================================
 -- LOAD GAME DARI SAVE
 -- ==========================================
 function Game.load_from_save()
@@ -253,6 +559,11 @@ function Game.load_from_save()
     -- Restore inventory
     if data.inventory then
         inventory = data.inventory
+        -- v2.2: guard legacy saves tanpa harvest/seeds subtable
+        if not inventory.seeds then inventory.seeds = {} end
+        if not inventory.harvest then inventory.harvest = {} end
+        if not inventory.money then inventory.money = 0 end
+        if not inventory.water then inventory.water = 0 end
     end
 
     -- Restore player
@@ -260,6 +571,54 @@ function Game.load_from_save()
         player.x = data.player.x or player.x
         player.y = data.player.y or player.y
         player.dir = data.player.dir or player.dir
+    end
+
+    -- Restore layout dunia (fix bug 6)
+    -- Dulu farm_rect & current_map tidak pernah disimpan, jadi ladang hasil
+    -- quest monk kembali 4x3 saat Continue dan tak bisa didapat ulang.
+    if type(data.farm_rect) == "table" then
+        local fr = data.farm_rect
+        if tonumber(fr.x) and tonumber(fr.y) and tonumber(fr.w) and tonumber(fr.h) then
+            farm_rect = { x = tonumber(fr.x), y = tonumber(fr.y),
+                          w = tonumber(fr.w), h = tonumber(fr.h) }
+            rebuild_farm_tiles()
+            -- Watering.init mengosongkan state basah, jadi HARUS dipanggil
+            -- sebelum deserialize data.watering di bawah.
+            Watering.init(farm_rect, grid_size)
+            local sw, sh = love.graphics.getWidth(), love.graphics.getHeight()
+            WorldDecor.init(sw, sh, farm_rect, tile_size)
+        end
+    end
+    if data.current_map == "farm" or data.current_map == "village" then
+        current_map = data.current_map
+    end
+    if type(data.saved_player_pos) == "table" then
+        saved_player_pos = data.saved_player_pos
+    end
+
+    -- v2.2 Stage 1: pulihkan efek pasca-deal (jalur utara + layu).
+    -- Game.load() sudah mereset state ini, jadi restore di sini aman.
+    if type(data.strange) == "table" then
+        local s = data.strange
+        strange.active        = (s.active == true)
+        strange.timer         = tonumber(s.timer) or 0
+        strange.wilt          = math.max(0, math.min(1, tonumber(s.wilt) or 0))
+        strange.path_open     = (s.path_open == true)
+        strange.sfx_wilt_done = (s.sfx_wilt_done == true)
+        strange.sfx_dead_done = (s.sfx_dead_done == true)
+    end
+
+    -- v2.3 Stage 4: pulihkan timeline pencurian (Jalur B).
+    -- Save lama (sebelum fitur ini) tidak punya data.theft — kalau tawaran
+    -- memang ditolak, mulai ulang timeline dari 0 supaya pencurian tetap
+    -- terjadi setelah Continue.
+    if type(data.theft) == "table" then
+        local t = data.theft
+        theft.active = (t.active == true)
+        theft.timer  = tonumber(t.timer) or 0
+        theft.done   = (t.done == true)
+    else
+        reset_theft()
     end
 
     -- Restore plants
@@ -284,6 +643,14 @@ function Game.load_from_save()
     -- Restore scene flags (biar entry story gak diulang setelah load)
     if data.scenes then
         ManageScene.deserialize(data.scenes)
+    end
+
+    -- v2.3 Stage 4: migrasi save lama (sebelum fitur pencurian). Setelah
+    -- flags ter-restore — kalau tawaran memang ditolak tapi pencurian belum
+    -- pernah tercatat, mulai ulang timeline supaya jalur B tetap jalan.
+    if ManageScene.flags.monk_refused and not theft.done then
+        theft.active = true
+        theft.timer  = 0
     end
 
     Game.set_notification(i18n.t("notif.load_ok"), 2)
@@ -320,6 +687,7 @@ end
 -- ROBBERY: Kurangi uang $10 (saat user pilih "Kasih $10" di scene 3)
 -- ==========================================
 function Game.apply_robbery_loss()
+    if not inventory then return end
     local loss = math.min(10, inventory.money or 0)
     inventory.money = (inventory.money or 0) - loss
     Game.set_notification(i18n.t("notif.money_lost"), 3)
@@ -331,10 +699,29 @@ end
 -- ==========================================
 -- Return true kalau ada scene yang baru di-trigger (main.lua switch state ke "scene").
 -- Dipanggil dari Game.update setiap frame.
-local pending_scene_trigger = nil   -- "conflict" | nil
+local pending_scene_trigger = nil   -- "conflict" | "revenge" | "chapter2_intro" | "chapter2_monk" | "chapter2_payment" | "path_choice" | nil
 local pending_scene_outcome  = nil  -- diisi saat scene selesai, dibaca main.lua
+local harvest_count_ch2 = 0           -- counter panen di chapter 2
 
 function Game.check_scene_triggers()
+    -- v2.3 Stage 2: player sampai di ujung jalur utara -> pilihan CEK/ENGGA.
+    -- Ditaruh paling atas: paling spesifik & paling mendesak (di situ
+    -- "tidak ada jalan keluar" menurut desain).
+    if strange.path_open
+       and current_map == "farm"
+       and player
+       and not ManageScene.flags.path_choice_done
+       and not ManageScene.is_active()
+       and pending_scene_trigger == nil then
+        local rect = Game.get_north_path_rect()
+        if rect and player.y <= 32
+           and (player.x + tile_size / 2) > rect.x
+           and (player.x + tile_size / 2) < rect.x + rect.w then
+            pending_scene_trigger = "path_choice"
+            return true
+        end
+    end
+
     -- Scene 3: trigger saat money >= 30 (dan scene 1+2 sudah selesai)
     if (inventory.money or 0) >= 30
        and not ManageScene.flags.conflict_done
@@ -356,7 +743,23 @@ function Game.check_scene_triggers()
         pending_scene_trigger = "revenge"
         return true
     end
+
+    -- v2.2: Scene 07 — Pembayaran pertama ke biksu
+    -- Trigger: setelah dialog monk selesai + player panen ≥ 1 kali di chapter 2
+    if harvest_count_ch2 >= 1
+       and ManageScene.flags.chapter2_monk_done
+       and not ManageScene.flags.chapter2_payment_done
+       and not ManageScene.is_active()
+       and pending_scene_trigger == nil then
+        pending_scene_trigger = "chapter2_payment"
+        return true
+    end
     return false
+end
+
+-- v2.2: Counter panen chapter 2 (dipanggil saat panen berhasil)
+function Game.on_harvest_ch2()
+    harvest_count_ch2 = harvest_count_ch2 + 1
 end
 
 -- Dipanggil main.lua saat state akan switch ke "scene"
@@ -379,11 +782,276 @@ function Game.consume_scene_outcome()
 end
 
 -- ==========================================
+-- v2.2: CHAPTER 2 SETUP
+-- ==========================================
+-- Dipanggil dari main.lua saat user pilih chapter 2 dari chapter select.
+function Game.start_chapter2()
+    -- Tandai chapter 2 sudah dimulai
+    -- Beri player modal awal: $50 + 5 benih wortel
+    if not ManageScene.flags.chapter2_started then
+        inventory = Inventory.new_default()
+        Inventory.add_seed(inventory, "carrot", 5)
+        inventory.money = 50
+        -- v2.2: Pastikan player mulai di map farm
+        current_map = "farm"
+        saved_player_pos = { farm = nil, village = nil }
+        -- Trigger scene intro chapter 2
+        pending_scene_trigger = "chapter2_intro"
+    end
+end
+
+-- v2.2: Trigger dialog dengan Monk (dipanggil saat player klik monk NPC)
+function Game.trigger_monk_dialog()
+    if not ManageScene.is_active() and not StoreUI.is_open() and not InvUI.is_open() then
+        pending_scene_trigger = "chapter2_monk"
+    end
+end
+
+-- ==========================================
+-- v2.2: MULTIPLE MAPS — switch antara farm & village
+-- ==========================================
+function Game.switch_map(target)
+    -- Guard: game belum di-load (player nil) — mis. perintah goto_village
+    -- dari debug console saat masih di menu. Tanpa guard ini: crash
+    -- "attempt to index a nil value (local 'player')".
+    if not player then return false end
+    if target == current_map then return end
+
+    -- Save player pos di map saat ini
+    saved_player_pos[current_map] = { x = player.x, y = player.y }
+
+    -- Switch map
+    current_map = target
+
+    -- Set player pos di map target
+    local sw, sh = love.graphics.getWidth(), love.graphics.getHeight()
+    if target == "village" then
+        -- Spawn di kiri village
+        if saved_player_pos.village then
+            player.x = saved_player_pos.village.x
+            player.y = saved_player_pos.village.y
+        else
+            player.x = 60
+            player.y = sh / 2 - 32
+        end
+    else  -- farm
+        -- Spawn di kanan farm
+        if saved_player_pos.farm then
+            player.x = saved_player_pos.farm.x
+            player.y = saved_player_pos.farm.y
+        else
+            player.x = sw - 80
+            player.y = sh / 2 - 32
+        end
+    end
+
+    if _G.play_sfx then _G.play_sfx("select") end
+end
+
+function Game.get_current_map()
+    return current_map or "farm"
+end
+
+-- v2.2: getter farm_rect — dipakai debug console, test, dan scene lanjutan
+-- (jalur utara & efek ekspansi monk).
+function Game.get_farm_rect()
+    return { x = farm_rect.x, y = farm_rect.y, w = farm_rect.w, h = farm_rect.h }
+end
+
+-- v2.2: Getters for debug console
+function Game.get_inventory()
+    return inventory
+end
+
+function Game.get_plant_count()
+    if not plants then return 0 end
+    return #plants
+end
+
+function Game.get_player_pos()
+    -- Guard: saat scene sedang aktif, player mungkin belum di-init
+    if not player then return 0, 0 end
+    return player.x, player.y
+end
+
+-- v2.2: Handle resize/fullscreen — reinit WorldDecor supaya background ngikutin
+function Game.on_resize(w, h)
+    WorldDecor.init(w, h, farm_rect, tile_size)
+    -- Rebuild village path tiles supaya match resolusi baru
+    village_path_tiles = {}
+    village_path_tiles_array = {}
+    local path_y = math.floor(h / 2 / tile_size)
+    for x = 1, math.ceil(w / tile_size) do
+        village_path_tiles[x .. "," .. path_y] = "h"
+        table.insert(village_path_tiles_array, { col = x, row = path_y })
+    end
+    -- Reposisi monk NPC & buildings di village supaya tidak keluar layar
+    if chapter2_npcs[1] then
+        chapter2_npcs[1].x = w - 200
+    end
+    if village_buildings[1] then
+        village_buildings[1].x = w - 140   -- church
+    end
+    if village_buildings[2] then
+        village_buildings[2].x = w - 320   -- home kanan
+    end
+end
+
+-- v2.2: Setelah dialog Monk selesai — kasih $300 + expand farm_rect
+function Game.complete_monk_quest()
+    -- v2.2: guard — bisa dipanggil dari debug console sebelum init game
+    if not inventory or not tile_size then return end
+    inventory.money = (inventory.money or 0) + 300
+    -- Expand farm dari 4x3 jadi 8x5
+    farm_rect = { x = 6, y = 1, w = 8, h = 5 }
+    -- Rebuild tile_map farm supaya area farm baru ter-cover
+    rebuild_farm_tiles()
+    -- Reinit Watering dengan farm_rect baru
+    Watering.init(farm_rect, grid_size)
+    -- Reinit WorldDecor supaya scatter decor ngikuti farm baru
+    local sw, sh = love.graphics.getWidth(), love.graphics.getHeight()
+    WorldDecor.init(sw, sh, farm_rect, tile_size)
+end
+
+-- ==========================================
+-- v2.2 fix bug 9: TERIMA vs TOLAK tawaran biarawan
+-- ==========================================
+-- Dulu keduanya selalu memberi +$300 & ladang 8x5 (choice_id dibuang), jadi
+-- pilihan pemain tidak berarti apa-apa. Sekarang:
+--   "accept" -> modal + ekspansi ladang (sesuai janji "tiga kali lipat")
+--   "refuse" -> TANPA modal, ladang tetap kecil, tapi monk menanam ancaman
+--               yang jadi pintu masuk scene lanjutan (pencurian tanaman/monster)
+--   nil (ESC/skip) -> dianggap accept (lihat manage_scene.trigger_chapter2_monk)
+function Game.apply_monk_choice(choice_id)
+    if not inventory or not tile_size then return end
+
+    if choice_id == "refuse" then
+        Game.set_notification(i18n.t("chapter.2.monk_refuse"), 6)
+        if _G.play_sfx then _G.play_sfx("error") end
+        -- v2.3 Stage 4 (Jalur B): tanpa modal & tanpa ekspansi ladang,
+        -- monster jadi "investor" lain — mulai timeline pencurian (+45 dtk).
+        -- Flag monk_refused ikut tersimpan ke save (ManageScene.serialize).
+        Game.start_theft_event()
+    else
+        Game.complete_monk_quest()
+        -- v2.2 Stage 1: mulai efek pasca-deal (suara aneh -> jalur utara -> layu)
+        Game.start_strange_event()
+        Game.set_notification(i18n.t("chapter.2.monk_deal"), 4)
+        if _G.play_sfx then _G.play_sfx("creepy") end
+    end
+end
+
+-- ==========================================
+-- STAGE 2: HASIL PILIHAN CEK / ENGGA
+-- ==========================================
+-- Buang n tanaman paling utara (paling dekat jalur). Return jumlah hilang.
+local function lose_plants_near_path(n)
+    if not plants or #plants == 0 or n <= 0 then return 0 end
+    local sorted = {}
+    for _, p in ipairs(plants) do sorted[#sorted + 1] = p end
+    table.sort(sorted, function(a, b)
+        if a.y ~= b.y then return a.y < b.y end
+        return a.x < b.x
+    end)
+    local kill = {}
+    for i = 1, math.min(n, #sorted) do kill[sorted[i]] = true end
+    local kept, removed = {}, 0
+    for _, p in ipairs(plants) do
+        if kill[p] then
+            removed = removed + 1
+        else
+            kept[#kept + 1] = p
+        end
+    end
+    plants = kept
+    return removed
+end
+
+-- Dipanggil main.lua setelah scene 08 (CEK/ENGGA) selesai.
+-- choice_id: "check" | "skip" | nil (ESC/skip = dianggap "skip").
+-- Efek biar pilihan tidak kosmetik (desain §1):
+--   CEK    -> flag path_checked & dark_clue true + tanaman hilang lebih banyak
+--   ENGGA  -> flag false, tanaman aman, player tidak tahu apa-apa
+function Game.apply_path_choice(choice_id)
+    if not inventory then return end
+    local checked = (choice_id == "check")
+    ManageScene.flags.path_checked = checked
+    ManageScene.flags.dark_clue    = checked
+
+    if checked then
+        local lost = lose_plants_near_path(PATH_CHOICE_PLANT_LOSS)
+        Game.set_notification(i18n.t("chapter.2.path_cek", { n = lost }), 6)
+        if _G.play_sfx then _G.play_sfx("creepy") end
+    else
+        Game.set_notification(i18n.t("chapter.2.path_engga"), 6)
+        if _G.play_sfx then _G.play_sfx("select") end
+    end
+end
+
+-- v2.3 Stage 4: tick timeline pencurian (dipanggil dari Game.update).
+-- Saat timer tembus THEFT_AT:
+--   1) buang maks THEFT_PLANT_LOSS tanaman (urut dari utara, sama seperti
+--      kehilangan Stage 2 — paling dekat jalur/monster),
+--   2) notifikasi "tanaman hilang — kejar!",
+--   3) pasang pending_scene_trigger "theft_chase" -> main.lua memulai
+--      chase mode "kejar" di frame berikutnya.
+local function update_theft(dt)
+    if not theft.active or theft.done then return end
+    theft.timer = theft.timer + dt
+    if theft.timer < THEFT_AT then return end
+
+    theft.active = false
+    theft.done   = true
+
+    -- Guard: pencurian hanya terjadi kalau tawaran memang ditolak.
+    -- (Aman untuk save lama / kondisi aneh di mana flag sudah berubah.)
+    if not ManageScene.flags.monk_refused then return end
+
+    local lost = lose_plants_near_path(THEFT_PLANT_LOSS)
+    ManageScene.flags.plants_stolen = true
+    Game.set_notification(i18n.t("chapter.2.theft", { n = lost }), 6)
+    if _G.play_sfx then _G.play_sfx("creepy") end
+    pending_scene_trigger = "theft_chase"
+end
+
+-- v2.2: Pembayaran pertama ke biksu — ambil 1/3 dari total harvest player
+function Game.apply_payment_to_monk()
+    if not inventory or not inventory.harvest then return end
+    -- Hitung total harvest yang player punya
+    local total = 0
+    local plant_ids = Plants.get_all_ids()
+    for _, id in ipairs(plant_ids) do
+        total = total + (inventory.harvest[id] or 0)
+    end
+    -- v2.2: kalau total 0, jangan ambil apa-apa (sebelumnya selalu ambil minimum 1 walau player kosong)
+    if total <= 0 then
+        Game._last_payment_taken = 0
+        return
+    end
+    -- Ambil 1/3 (minimum 1)
+    local taken = math.max(1, math.floor(total / 3))
+    -- Ambil dari tanaman secara proporsional
+    local remaining = taken
+    for _, id in ipairs(plant_ids) do
+        if remaining <= 0 then break end
+        local have = inventory.harvest[id] or 0
+        local take = math.min(have, remaining)
+        if take > 0 then
+            inventory.harvest[id] = have - take
+            remaining = remaining - take
+        end
+    end
+    -- Catat jumlah aktual yang diambil
+    Game._last_payment_taken = taken - remaining
+end
+
+-- ==========================================
 -- SAVE GAME
 -- ==========================================
 function Game.save()
     local data = {
-        version = 2,
+        -- v3: tambah farm_rect / current_map / saved_player_pos (fix bug 6)
+        version = 3,
         timestamp = os.time(),
         inventory = inventory,
         player = { x = player.x, y = player.y, dir = player.dir },
@@ -391,6 +1059,27 @@ function Game.save()
         watering = Watering.serialize(),
         settings = Options.get_settings(),
         scenes = ManageScene.serialize(),
+        -- Layout dunia: tanpa ini ekspansi ladang hasil quest monk (8x5)
+        -- hilang selamanya saat Continue karena chapter2_monk_done=true
+        -- mencegah quest diulang.
+        farm_rect        = farm_rect,
+        current_map      = current_map,
+        saved_player_pos = saved_player_pos,
+        -- v2.2 Stage 1: efek pasca-deal (jalur utara + layu tanaman)
+        strange = {
+            active        = strange.active,
+            timer         = strange.timer,
+            wilt          = strange.wilt,
+            path_open     = strange.path_open,
+            sfx_wilt_done = strange.sfx_wilt_done,
+            sfx_dead_done = strange.sfx_dead_done,
+        },
+        -- v2.3 Stage 4: timeline pencurian (Jalur B — TOLAK)
+        theft = {
+            active = theft.active,
+            timer  = theft.timer,
+            done   = theft.done,
+        },
     }
     local ok, err = Save.save(data)
     if ok then
@@ -428,6 +1117,12 @@ function Game.update(dt)
     -- Cek trigger scene otomatis (scene 3: konflik Mira+Rudi saat $30)
     Game.check_scene_triggers()
 
+    -- v2.2 Stage 1: majukan efek pasca-deal (jalur utara + layu)
+    update_strange(dt)
+
+    -- v2.3 Stage 4: majukan timeline pencurian (Jalur B — TOLAK)
+    update_theft(dt)
+
     -- Gerakan player
     local dx, dy = 0, 0
     if love.keyboard.isDown("w", "up")    then dy = -1 end
@@ -458,6 +1153,29 @@ function Game.update(dt)
         player.timer = 0
         player.frame = 1
     end
+
+    -- v2.2: MULTIPLE MAPS — cek edge untuk switch map
+    -- Trigger zone dibuat lebar supaya player gampang nyentuh.
+    -- Clamp posisi juga di-relaks di sumbu X biar bisa nyentuh edge.
+    local sw, sh = love.graphics.getWidth(), love.graphics.getHeight()
+    if current_map == "farm" and ManageScene.flags.chapter2_intro_done then
+        -- Edge kanan farm → pindah ke village (trigger lebih lebar dari clamp)
+        if player.x > sw - 40 then
+            Game.switch_map("village")
+        end
+    end
+    if current_map == "village" then
+        -- Edge kiri village → pindah ke farm
+        if player.x < 20 then
+            Game.switch_map("farm")
+        end
+    end
+
+    -- Clamp player posisi supaya tidak keluar layar.
+    -- v2.2: clamp X lebih longgar (sw + 20) supaya player bisa nyentuh trigger
+    -- edge kanan farm, lalu switch_map akan teleport player ke map baru.
+    player.x = math.max(-20, math.min(sw + 20, player.x))
+    player.y = math.max(0, math.min(sh - 40, player.y))
 
     -- Pertumbuhan tanaman
     for _, plant in ipairs(plants) do
@@ -500,65 +1218,212 @@ end
 -- ==========================================
 -- DRAW
 -- ==========================================
+-- Gambar sprite player di posisi sembarang (dipakai Stage 3 / chase_sequence
+-- supaya karakter di kejar-kejaran sama persis dengan karakter di dunia).
+-- x, y = pojok kiri atas sprite (sebelum diskalakan), sama seperti player.x/y.
+-- dir = "down"|"left"|"right"|"up" · frame = 1..3 (3 frame per baris).
+function Game.draw_player_at(x, y, dir, frame)
+    if not walk_sheet_img or not walk_frames or not dir_row then return end
+    local r = dir_row[dir or "up"] or 0
+    local f = frame or 1
+    local quad = walk_frames[r] and walk_frames[r][f]
+    if not quad then return end
+
+    love.graphics.setColor(0, 0, 0, 0.35)
+    love.graphics.ellipse("fill", x + 16, y + 30, 16, 6)
+    love.graphics.setColor(1, 1, 1, 1)
+
+    local s = (player and player.scale) or 4
+    love.graphics.draw(walk_sheet_img, quad, x + 16, y + 16, 0, s, s, 16, 16)
+end
+
 function Game.draw()
     local sw, sh = love.graphics.getWidth(), love.graphics.getHeight()
     local scale = tile_size / 16
 
     -- 1. Background rumput gradasi 2-tone + jalanan tanah + scatter decor
-    --    (bunga, batu, semak, jamur, tallgrass, pohon, kupu-kupu)
     WorldDecor.draw_all(UITheme.time, tile_size)
 
-    -- 2. Tile rumput di area farm (pakai grass tileset, supaya farm terlihat beda dari tanah luar)
-    for y = 1, #tile_map do
-        for x = 1, #tile_map[y] do
-            if tile_map[y][x] == 1 then
-                local pos_x = (x - 1) * tile_size
-                local pos_y = (y - 1) * tile_size
-                local var = grass_variation[y][x]
-                love.graphics.draw(grass_img, grass_quads[var], pos_x, pos_y, 0, scale, scale)
+    -- v2.2: MULTIPLE MAPS — draw content sesuai map aktif
+    if current_map == "village" then
+        -- ===== VILLAGE MAP =====
+        -- Jalan tanah village — v2.2: pakai array pre-computed
+        for _, p in ipairs(village_path_tiles_array) do
+            local x = (p.col - 1) * tile_size
+            local y = (p.row - 1) * tile_size
+            love.graphics.setColor(0.55, 0.40, 0.22, 1)
+            love.graphics.rectangle("fill", x, y, tile_size, tile_size)
+            love.graphics.setColor(0.62, 0.46, 0.28, 0.4)
+            love.graphics.rectangle("fill", x + 4, y + 4, tile_size - 8, tile_size - 8)
+        end
+        love.graphics.setColor(1, 1, 1, 1)
+
+        -- Buildings (church + homes) — fix bug 4: shadow di base building, bukan sprite-bottom
+        for _, b in ipairs(village_buildings) do
+            if b.img then
+                -- Shadow elips di bawah base building (bukan di sprite bottom)
+                -- Fix bug 4: shadow贴合 ke base building, tidak terbang
+                love.graphics.setColor(0, 0, 0, 0.35)
+                love.graphics.ellipse("fill", b.x + b.w/2, b.y + b.h + b.shadow_offset_y,
+                    b.w * 0.42, 10)
+                love.graphics.setColor(1, 1, 1, 1)
+                -- Hitung scale dari sprite original ke ukuran target
+                local orig_w, orig_h = b.img:getDimensions()
+                local sx = b.w / orig_w
+                local sy = b.h / orig_h
+                love.graphics.draw(b.img, b.x, b.y, 0, sx, sy)
             end
         end
-    end
 
-    -- 3. Overlay tile basah (biru transparan)
-    Watering.draw_overlay()
-
-    -- 4. Pagar (3 lapis: shadow + body + highlight)
-    local f_scale = tile_size / 16
-    -- Shadow di belakang pagar
-    love.graphics.setColor(0, 0, 0, 0.3)
-    for x = farm_rect.x, farm_rect.x + farm_rect.w - 1 do
-        love.graphics.rectangle("fill", (x - 1) * tile_size + 3, (farm_rect.y - 1) * tile_size + 3, tile_size, 4)
-        love.graphics.rectangle("fill", (x - 1) * tile_size + 3, (farm_rect.y + farm_rect.h - 1) * tile_size + 3, tile_size, 4)
-    end
-    for y = farm_rect.y, farm_rect.y + farm_rect.h - 1 do
-        love.graphics.rectangle("fill", (farm_rect.x - 1) * tile_size + 3, (y - 1) * tile_size + 3, 4, tile_size)
-        love.graphics.rectangle("fill", (farm_rect.x + farm_rect.w - 1) * tile_size + 3, (y - 1) * tile_size + 3, 4, tile_size)
-    end
-    love.graphics.setColor(1, 1, 1, 1)
-    for x = farm_rect.x, farm_rect.x + farm_rect.w - 1 do
-        love.graphics.draw(fence_img, fence_quad, (x - 1) * tile_size, (farm_rect.y - 1) * tile_size, 0, f_scale, f_scale)
-        love.graphics.draw(fence_img, fence_quad, (x - 1) * tile_size, (farm_rect.y + farm_rect.h - 1) * tile_size, 0, f_scale, f_scale)
-    end
-    for y = farm_rect.y, farm_rect.y + farm_rect.h - 1 do
-        love.graphics.draw(fence_img, fence_quad, (farm_rect.x - 1) * tile_size, (y - 1) * tile_size, 0, f_scale, f_scale)
-        love.graphics.draw(fence_img, fence_quad, (farm_rect.x + farm_rect.w - 1) * tile_size, (y - 1) * tile_size, 0, f_scale, f_scale)
-    end
-
-    -- 5. Tanaman
-    for _, plant in ipairs(plants) do
-        local data = Plants.get(plant.type)
-        local draw_x = plant.x + (grid_size / 2)
-        local draw_y = plant.y + (grid_size / 2)
-        local sheet = plant_sheets[plant.type]
-        local frames = plant_frames[plant.type]
-        local frame = frames[plant.frame]
-        local crop_scale = 4
-        local origin_x, origin_y = 8, 8
-        if data.sheet_path:find("32") then
-            origin_y = 16
+        -- NPC Monk (di village)
+        for _, npc in ipairs(chapter2_npcs) do
+            if npc.sprite and npc.quad then
+                -- Shadow
+                love.graphics.setColor(0, 0, 0, 0.35)
+                love.graphics.ellipse("fill", npc.x + npc.w/2, npc.y + npc.h, npc.w * 0.4, 8)
+                love.graphics.setColor(1, 1, 1, 1)
+                -- Monk sprite (32x32 -> scale 2x = 64x64)
+                love.graphics.draw(npc.sprite, npc.quad, npc.x, npc.y, 0, 2, 2)
+                -- Label "MONK" di atas
+                love.graphics.setColor(UITheme.colors.accent)
+                love.graphics.setFont(UITheme.get_font(20))
+                love.graphics.printf(npc.label, npc.x - 20, npc.y - 24, npc.w + 40, "center")
+                -- Interact hint kalau player dekat
+                local dx = (player.x + 16) - (npc.x + npc.w/2)
+                local dy = (player.y + 16) - (npc.y + npc.h/2)
+                local dist = math.sqrt(dx*dx + dy*dy)
+                if dist < npc.interact_range and not ManageScene.flags.chapter2_monk_done then
+                    love.graphics.setColor(1, 1, 0.8, 0.8 + 0.2 * math.sin(UITheme.time * 4))
+                    love.graphics.setFont(UITheme.get_font(18))
+                    love.graphics.printf("[Click to talk]", npc.x - 50, npc.y + npc.h + 6, npc.w + 100, "center")
+                end
+                love.graphics.setColor(1, 1, 1, 1)
+            end
         end
-        love.graphics.draw(sheet, frame, draw_x, draw_y, 0, crop_scale, crop_scale, origin_x, origin_y)
+
+        -- Sign "← Back to Farm" di kiri layar — panah besar biar jelas
+        local pulse = 0.7 + 0.3 * math.sin(UITheme.time * 3)
+        love.graphics.setColor(UITheme.colors.accent[1], UITheme.colors.accent[2], UITheme.colors.accent[3], pulse)
+        love.graphics.setFont(UITheme.get_title_font(40))
+        love.graphics.printf("←", 20, sh / 2 - 30, 60, "center")
+        love.graphics.setColor(UITheme.colors.accent)
+        love.graphics.setFont(UITheme.get_font(22))
+        love.graphics.printf("FARM", 0, sh / 2 + 20, 100, "center")
+        love.graphics.setColor(1, 1, 1, 0.6)
+        love.graphics.setFont(UITheme.get_font(16))
+        love.graphics.printf("← Walk left", 0, sh / 2 + 50, 130, "center")
+        love.graphics.setColor(1, 1, 1, 1)
+
+    else
+        -- ===== FARM MAP (existing) =====
+        -- Tile rumput di area farm
+        for y = 1, #tile_map do
+            for x = 1, #tile_map[y] do
+                if tile_map[y][x] == 1 then
+                    local pos_x = (x - 1) * tile_size
+                    local pos_y = (y - 1) * tile_size
+                    local var = grass_variation[y][x]
+                    love.graphics.draw(grass_img, grass_quads[var], pos_x, pos_y, 0, scale, scale)
+                end
+            end
+        end
+
+        -- Overlay tile basah (biru transparan)
+        Watering.draw_overlay()
+
+        -- Pagar (3 lapis: shadow + body)
+        local f_scale = tile_size / 16
+        love.graphics.setColor(0, 0, 0, 0.3)
+        for x = farm_rect.x, farm_rect.x + farm_rect.w - 1 do
+            love.graphics.rectangle("fill", (x - 1) * tile_size + 3, (farm_rect.y - 1) * tile_size + 3, tile_size, 4)
+            love.graphics.rectangle("fill", (x - 1) * tile_size + 3, (farm_rect.y + farm_rect.h - 1) * tile_size + 3, tile_size, 4)
+        end
+        for y = farm_rect.y, farm_rect.y + farm_rect.h - 1 do
+            love.graphics.rectangle("fill", (farm_rect.x - 1) * tile_size + 3, (y - 1) * tile_size + 3, 4, tile_size)
+            love.graphics.rectangle("fill", (farm_rect.x + farm_rect.w - 1) * tile_size + 3, (y - 1) * tile_size + 3, 4, tile_size)
+        end
+        love.graphics.setColor(1, 1, 1, 1)
+        for x = farm_rect.x, farm_rect.x + farm_rect.w - 1 do
+            love.graphics.draw(fence_img, fence_quad, (x - 1) * tile_size, (farm_rect.y - 1) * tile_size, 0, f_scale, f_scale)
+            love.graphics.draw(fence_img, fence_quad, (x - 1) * tile_size, (farm_rect.y + farm_rect.h - 1) * tile_size, 0, f_scale, f_scale)
+        end
+        for y = farm_rect.y, farm_rect.y + farm_rect.h - 1 do
+            love.graphics.draw(fence_img, fence_quad, (farm_rect.x - 1) * tile_size, (y - 1) * tile_size, 0, f_scale, f_scale)
+            love.graphics.draw(fence_img, fence_quad, (farm_rect.x + farm_rect.w - 1) * tile_size, (y - 1) * tile_size, 0, f_scale, f_scale)
+        end
+
+        -- v2.2 Stage 1: JALUR UTARA — muncul beberapa detik setelah deal monk.
+        -- Gambar SETELAH pagar supaya segmen pagar di 3 tile tengah-atas
+        -- ketutup (terbaca sebagai lubang jalan ke arah utara/layar atas).
+        local path_rect = Game.get_north_path_rect()
+        if path_rect then
+            local px   = path_rect.x
+            local pw   = path_rect.w
+            local ptop = path_rect.y
+            local pbot = path_rect.h
+
+            -- Tanah jalur (2 tone, gaya sama dgn jalan village)
+            love.graphics.setColor(0.48, 0.36, 0.21, 1)
+            love.graphics.rectangle("fill", px, ptop, pw, pbot - ptop)
+            love.graphics.setColor(0.56, 0.43, 0.27, 0.5)
+            love.graphics.rectangle("fill", px + 5, ptop + 4, pw - 10, pbot - ptop - 8)
+
+            -- Kegelapan di ujung atas = lorong menjorok keluar layar
+            for i = 1, 3 do
+                local band = 9
+                love.graphics.setColor(0.04, 0.02, 0.03, 0.42 + 0.18 * i)
+                love.graphics.rectangle("fill", px, ptop + (i - 1) * band, pw, band)
+            end
+            love.graphics.setColor(1, 1, 1, 1)
+
+            -- Hint panah berdenyut
+            local pulse = 0.6 + 0.4 * math.sin(UITheme.time * 4)
+            love.graphics.setColor(1, 0.4, 0.35, pulse)
+            love.graphics.setFont(UITheme.get_title_font(32))
+            love.graphics.printf("↑", px - 20, pbot + 8, pw + 40, "center")
+            love.graphics.setColor(1, 1, 1, 1)
+        end
+
+        -- Tanaman
+        -- v2.2 Stage 1: tint layu — makin tinggi strange.wilt, makin coklat kusam
+        local wilt = strange.wilt
+        if wilt > 0 then
+            love.graphics.setColor(1 - 0.50 * wilt, 1 - 0.62 * wilt, 1 - 0.68 * wilt, 1)
+        end
+        for _, plant in ipairs(plants) do
+            local data = Plants.get(plant.type)
+            local draw_x = plant.x + (grid_size / 2)
+            local draw_y = plant.y + (grid_size / 2)
+            local sheet = plant_sheets[plant.type]
+            local frames = plant_frames[plant.type]
+            local frame = frames[plant.frame]
+            local crop_scale = 4
+            local origin_x, origin_y = 8, 8
+            if data.sheet_path:find("32") then
+                origin_y = 16
+            end
+            love.graphics.draw(sheet, frame, draw_x, draw_y, 0, crop_scale, crop_scale, origin_x, origin_y)
+        end
+        if wilt > 0 then
+            love.graphics.setColor(1, 1, 1, 1)
+        end
+
+        -- Sign "Village →" di kanan layar (kalau chapter 2 intro done)
+        -- v2.2: panah besar + label biar jelas cara masuk village
+        if ManageScene.flags.chapter2_intro_done then
+            -- Panah besar berdenyut di edge kanan
+            local pulse = 0.7 + 0.3 * math.sin(UITheme.time * 3)
+            love.graphics.setColor(UITheme.colors.accent[1], UITheme.colors.accent[2], UITheme.colors.accent[3], pulse)
+            love.graphics.setFont(UITheme.get_title_font(40))
+            love.graphics.printf("→", sw - 80, sh / 2 - 30, 60, "center")
+            love.graphics.setColor(UITheme.colors.accent)
+            love.graphics.setFont(UITheme.get_font(22))
+            love.graphics.printf("VILLAGE", sw - 100, sh / 2 + 20, 100, "center")
+            love.graphics.setColor(1, 1, 1, 0.6)
+            love.graphics.setFont(UITheme.get_font(16))
+            love.graphics.printf("Walk right →", sw - 130, sh / 2 + 50, 130, "center")
+            love.graphics.setColor(1, 1, 1, 1)
+        end
     end
 
     -- 6. Karakter (dengan shadow elips di bawah)
@@ -604,24 +1469,7 @@ function Game.draw()
         local slide_t = math.min(1, (1 - (life / max_life)) * 4)
         local fade = 1
         if life < 0.5 then fade = life / 0.5 end
-        local target_y = sh / 2 - 30
-        local y_off = (1 - slide_t) * -40
-
-        local box_w, box_h = 480, 56
-        local bx = sw / 2 - box_w / 2
-        local by = target_y + y_off
-
-        UITheme.draw_panel(bx, by, box_w, box_h,
-            { fill = {0, 0, 0, 0.88 * fade}, border = 2, shadow = false })
-        UITheme.draw_corner_brackets(bx - 2, by - 2, box_w + 4, box_h + 4,
-            { color = { UITheme.colors.accent[1], UITheme.colors.accent[2],
-                        UITheme.colors.accent[3], 0.85 * fade },
-              size = 10, thick = 2 })
-
-        love.graphics.setColor(1, 1, 1, fade)
-        love.graphics.setFont(UITheme.get_font(26))
-        love.graphics.printf(notification.text, sw / 2 - 220, by + box_h/2 - 13, 440, "center")
-        love.graphics.setColor(1, 1, 1, 1)
+        Game.draw_notification(sh / 2 - 30, slide_t, fade)
     end
 
     -- 11. UI overlays (store / inventory)
@@ -905,7 +1753,7 @@ function perform_plant()
         grow_timer = 0,
         frame = 1,
     })
-    Game.set_notification(i18n.t("notif.planted", { name = i18n.t(Plants.get(selected_plant).name_key) }), 1.5)
+    -- (v2.2) Notif planted dihapus — terlalu rame. Cukup SFX.
     if _G.play_sfx then _G.play_sfx("plant") end
 end
 
@@ -941,7 +1789,7 @@ function perform_water()
     -- Siram tile
     Inventory.use_water(inventory, Watering.WATER_PER_USE)
     Watering.set_watered(col, row)
-    Game.set_notification(i18n.t("notif.watered"), 1.5)
+    -- (v2.2) Notif watered dihapus — terlalu rame. Cukup SFX.
     if _G.play_sfx then _G.play_sfx("water") end
 end
 
@@ -958,11 +1806,12 @@ function perform_harvest(grid_x, grid_y)
                 local qty = data.harvest_qty or 1
                 Inventory.add_harvest(inventory, plant.type, qty)
                 table.remove(plants, i)
-                Game.set_notification(i18n.t("notif.harvested", {
-                    name = i18n.t(data.name_key),
-                    qty = qty,
-                }), 2)
+                -- (v2.2) Notif harvested dihapus — terlalu rame. Cukup SFX.
                 if _G.play_sfx then _G.play_sfx("harvest") end
+                -- v2.2: Increment chapter 2 harvest counter (untuk trigger scene 07)
+                if ManageScene.flags.chapter2_monk_done and not ManageScene.flags.chapter2_payment_done then
+                    Game.on_harvest_ch2()
+                end
             else
                 Game.set_notification(i18n.t("notif.not_ready", { name = i18n.t(data.name_key) }), 1.5)
                 if _G.play_sfx then _G.play_sfx("error") end
@@ -990,7 +1839,25 @@ function Game.mousepressed(x, y, button)
     end
 
     if button == 1 then
-        -- Klik hotbar: pilih benih atau tool
+        -- v2.2: Cek klik NPC monk dulu (hanya di map village)
+        if current_map == "village" and ManageScene.flags.chapter2_started and not ManageScene.flags.chapter2_monk_done then
+            for _, npc in ipairs(chapter2_npcs) do
+                if x >= npc.x and x <= npc.x + npc.w and
+                   y >= npc.y and y <= npc.y + npc.h then
+                    -- Cek jarak player ke NPC
+                    local dx = (player.x + 16) - (npc.x + npc.w/2)
+                    local dy = (player.y + 16) - (npc.y + npc.h/2)
+                    local dist = math.sqrt(dx*dx + dy*dy)
+                    if dist < npc.interact_range then
+                        Game.trigger_monk_dialog()
+                        if _G.play_sfx then _G.play_sfx("select") end
+                        return
+                    end
+                end
+            end
+        end
+
+        -- Klik hotbar: pilih benih atau tool (bisa di semua map)
         local slot_size = 70
         local padding = 10
         local total_slots = 6
@@ -1007,11 +1874,9 @@ function Game.mousepressed(x, y, button)
                     local ids = Plants.get_all_ids()
                     selected_plant = ids[i]
                     active_tool = "hoe"
-                    Game.set_notification(i18n.t("notif.select", { name = i18n.t(Plants.get(selected_plant).name_key) }), 1.5)
                     if _G.play_sfx then _G.play_sfx("select") end
                 elseif i == 6 then
                     active_tool = "water"
-                    Game.set_notification(i18n.t("tool.watering"), 1.5)
                     if _G.play_sfx then _G.play_sfx("select") end
                 end
                 return
@@ -1019,6 +1884,9 @@ function Game.mousepressed(x, y, button)
         end
 
     elseif button == 2 then
+        -- v2.2: Di village, klik kanan tidak melakukan apa-apa (tidak ada farm)
+        if current_map == "village" then return end
+
         -- Klik kanan: panen (atau siram kalau tool water aktif)
         local col = math.floor(x / grid_size) + 1
         local row = math.floor(y / grid_size) + 1
@@ -1039,7 +1907,7 @@ function Game.mousepressed(x, y, button)
                 end
                 Inventory.use_water(inventory, Watering.WATER_PER_USE)
                 Watering.set_watered(col, row)
-                Game.set_notification(i18n.t("notif.watered"), 1.5)
+                -- (v2.2) Notif watered dihapus
                 if _G.play_sfx then _G.play_sfx("water") end
             end
         else
@@ -1073,6 +1941,23 @@ function Game.keypressed(key)
         return
     end
 
+    -- v2.3 Stage 4: pintu masuk ULANG zona bahaya (flag zone_danger_unlocked
+    -- di-set saat keluar zona pertama kali). Pakai EVENT tombol — bukan
+    -- isDown — supaya teleport debug (driver move_to) tidak ikut membuka zona.
+    -- Syarat: jalur utara masih ada & player berdiri di ujungnya.
+    if (key == "up" or key == "w")
+       and ManageScene.flags.zone_danger_unlocked
+       and strange.path_open
+       and current_map == "farm" and player and tile_size then
+        local rect = Game.get_north_path_rect()
+        if rect and player.y <= 32
+           and (player.x + tile_size / 2) > rect.x
+           and (player.x + tile_size / 2) < rect.x + rect.w then
+            pending_scene_trigger = "zone"
+            return
+        end
+    end
+
     -- F1: toko
     if key == "f1" then
         if StoreUI.is_open() then
@@ -1098,8 +1983,7 @@ function Game.keypressed(key)
     -- Q: ganti tool (hoe <-> water)
     if key == "q" then
         active_tool = (active_tool == "hoe") and "water" or "hoe"
-        local tool_name = (active_tool == "hoe") and i18n.t("tool.seeds") or i18n.t("tool.watering")
-        Game.set_notification(tool_name, 1.5)
+        -- (v2.2) Notif tool switch dihapus — cukup SFX + tool indicator HUD
         if _G.play_sfx then _G.play_sfx("select") end
         return
     end
@@ -1147,7 +2031,7 @@ function Game.keypressed(key)
         if idx <= #ids then
             selected_plant = ids[idx]
             active_tool = "hoe"
-            Game.set_notification(i18n.t("notif.select", { name = i18n.t(Plants.get(selected_plant).name_key) }), 1.5)
+            -- (v2.2) Notif select dihapus, cukup SFX
             if _G.play_sfx then _G.play_sfx("select") end
         end
     end
@@ -1159,7 +2043,7 @@ function Game.keypressed(key)
             return
         end
         Inventory.refill_water(inventory, 100)
-        Game.set_notification(i18n.t("notif.refilled"), 1.5)
+        -- (v2.2) Notif refilled dihapus
         if _G.play_sfx then _G.play_sfx("refill") end
     end
 end

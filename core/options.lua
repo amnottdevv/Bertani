@@ -241,7 +241,9 @@ function Options.mousepressed(x, y, button)
             local ax, ay, aw, ah = unpack(opt.click_area)
             if x >= ax and x <= ax + aw and y >= ay and y <= ay + ah then
                 opt.value = not opt.value
-                love.window.setFullscreen(opt.value)
+                -- v2.2: pakai mode "desktop" biar fullscreen ngikutin resolusi layar
+                -- (fix bug 1: layar sebagian hitam saat fullscreen)
+                love.window.setFullscreen(opt.value, "desktop")
                 if _G.play_sfx then _G.play_sfx("select") end
                 return "changed"
             end

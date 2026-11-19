@@ -26,7 +26,7 @@ local Scene4 = {}
 
 -- Path sprite (dipusatkan supaya gampang ganti)
 local SPRITE = {
-    mira  = "gfx/characters/males/male_01/idle/male_01_hat_idle_32x32.png",
+    mira  = "gfx/characters/npc_mira.png",  -- v2.2: pakai NPC baru
     rudi  = "gfx/characters/males/male_01/hoe/male_01_hoe_32x32_3frames.png",
     andri = "gfx/characters/males/male_01/idle/male_01_hat_idle_32x32.png",
     leo   = "gfx/characters/males/male_01/idle/male_01_idle_32x32.png",
@@ -88,7 +88,12 @@ start_setup_choice = function(on_complete)
                 start_accept_path(on_complete)
             end
         end,
-        on_complete = function() end,
+        -- ESC/skip di step choice: hasilkan outcome "skipped" supaya
+        -- manage_scene tetap set revenge_done dan main.lua bisa keluar
+        -- dari state "scene" (fix bug 1: layar hitam permanen).
+        on_complete = function()
+            if on_complete then on_complete("skipped") end
+        end,
     })
 end
 

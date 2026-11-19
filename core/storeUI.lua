@@ -157,29 +157,76 @@ function StoreUI.draw()
 end
 
 -- ==========================================
+-- LAYOUT GRID ITEM (adaptif terhadap ukuran window)
+-- ==========================================
+-- Fix bug 4: dulu grid_y=240, item_h=230, cols=3 → baris ke-2 jatuh di
+-- y=490..720, di luar layar pada resolusi default 960x640 (min 600),
+-- sehingga item ke-4 & ke-5 (Labu, Kentang) tidak terlihat dan tombol
+-- Beli/Jual-nya tidak bisa diklik. Sekarang jumlah kolom & tinggi item
+-- dihitung dari ruang yang tersedia (5 item muat dalam 1 baris).
+local function compute_grid(n)
+    local sw, sh = love.graphics.getWidth(), love.graphics.getHeight()
+    local gap = 16
+    local grid_y = 236                    -- di bawah tab + info uang
+    local avail_w = sw - 160              -- dalam panel (panel_x=50, margin 30 tiap sisi)
+    local avail_h = (sh - 95) - grid_y    -- berhenti di atas tombol sell_all/close
+
+    -- Pilih kolom: semua item muat 1 baris selama lebar item >= 96px
+    local cols = math.max(1, n)
+    while cols > 1 and (avail_w - (cols - 1) * gap) / cols < 96 do
+        cols = cols - 1
+    end
+    local rows = math.ceil(n / cols)
+
+    local item_w = math.min(200, (avail_w - (cols - 1) * gap) / cols)
+    local item_h = math.min(230, (avail_h - (rows - 1) * gap) / rows)
+    if item_h < 190 then item_h = 190 end  -- batas bawah desain kartu
+
+    local total_w = cols * item_w + (cols - 1) * gap
+    local total_h = rows * item_h + (rows - 1) * gap
+
+    local x = (sw - total_w) / 2
+    local y = grid_y
+    if total_h > avail_h then
+        y = math.max(190, grid_y - (total_h - avail_h))  -- geser ke atas biar muat
+    end
+    return x, y, item_w, item_h, cols, gap
+end
+
+-- Anchor vertikal kartu: semua elemen dihitung dari tombol (paling bawah)
+-- supaya tetap rapi walau item_h berubah karena resolusi.
+local function card_anchors(y, item_h)
+    local btn_w, btn_h = 110, 40
+    local btn_y   = y + item_h - btn_h - 10
+    local owned_y = btn_y - 24
+    local price_y = owned_y - 34
+    local name_y  = price_y - 34
+    local icon_scale = (item_h >= 200) and 4 or 3
+    -- jangan sampai icon keluar dari kartu atas
+    local icon_cy = math.max(name_y - (icon_scale == 4 and 44 or 36), y + icon_scale * 8)
+    return btn_w, btn_h, btn_y, owned_y, price_y, name_y, icon_scale, icon_cy
+end
+
+-- ==========================================
 -- DRAW: TAB BELI BENIH — dengan corner brackets + hover lift
 -- ==========================================
 function draw_buy_tab()
     if not inv_ref or not plant_defs_ref then return end
-    local sw = love.graphics.getWidth()
     local items = Store.get_seed_items(plant_defs_ref)
 
-    local item_w, item_h = 190, 230
-    local cols = 3
-    local rows = math.ceil(#items / cols)
-    local total_w = cols * (item_w + 20) - 20
-    local total_h = rows * (item_h + 20) - 20
-    local grid_x = (sw - total_w) / 2
-    local grid_y = 240
+    local grid_x, grid_y, item_w, item_h, cols, gap = compute_grid(#items)
 
     buttons = {}
     for i, item in ipairs(items) do
         local r = math.floor((i-1) / cols)
         local c = (i-1) % cols
-        local x = grid_x + c * (item_w + 20)
-        local y_base = grid_y + r * (item_h + 20)
+        local x = grid_x + c * (item_w + gap)
+        local y_base = grid_y + r * (item_h + gap)
         local is_hover_card = (hovered_button == i)
         local y = is_hover_card and (y_base - 4) or y_base
+
+        local btn_w, btn_h, btn_y, owned_y, price_y, name_y, icon_scale, icon_cy =
+            card_anchors(y, item_h)
 
         -- Background item card (lift saat hover, tanpa glow supaya tidak rame)
         local fill_color = is_hover_card and { 0.30, 0.50, 0.28, 0.95 } or UITheme.colors.panel_alt
@@ -193,30 +240,30 @@ function draw_buy_tab()
         local icon_quad = _G.plant_icons and _G.plant_icons[item.id] and _G.plant_icons[item.id].seed
         if icon_sheet and icon_quad then
             love.graphics.setColor(1, 1, 1, 1)
-            love.graphics.draw(icon_sheet, icon_quad, x + item_w/2 - 30, y + 20, 0, 4, 4, 8, 8)
+            -- titik gambar = pusat visual (origin 8 * scale = setengah ukuran)
+            love.graphics.draw(icon_sheet, icon_quad, x + item_w/2, icon_cy,
+                0, icon_scale, icon_scale, 8, 8)
         end
 
         -- Nama benih
         love.graphics.setColor(UITheme.colors.text)
         love.graphics.setFont(UITheme.get_font(22))
-        love.graphics.printf(i18n.t(item.plant_data.seed_key), x, y + 100, item_w, "center")
+        love.graphics.printf(i18n.t(item.plant_data.seed_key), x, name_y, item_w, "center")
 
         -- Harga (dengan ikon koin mini)
-        UITheme.draw_coin_icon(x + item_w/2 - 32, y + 148, 6)
+        UITheme.draw_coin_icon(x + item_w/2 - 32, price_y + 10, 6)
         love.graphics.setColor(UITheme.colors.accent)
         love.graphics.setFont(UITheme.get_font(22))
-        love.graphics.printf("$" .. item.buy_price, x + item_w/2 - 20, y + 138, 60, "left")
+        love.graphics.printf("$" .. item.buy_price, x + item_w/2 - 20, price_y, 60, "left")
 
         -- Stok benih yang dimiliki
         local owned = inv_ref.seeds[item.id] or 0
         love.graphics.setColor(UITheme.colors.text_dim)
         love.graphics.setFont(UITheme.get_font(18))
-        love.graphics.printf(i18n.t("store.unit_bibit") .. ": " .. owned, x, y + 175, item_w, "center")
+        love.graphics.printf(i18n.t("store.unit_bibit") .. ": " .. owned, x, owned_y, item_w, "center")
 
         -- Tombol Beli
-        local btn_w, btn_h = 110, 40
         local btn_x = x + item_w/2 - btn_w/2
-        local btn_y = y + item_h - btn_h - 10
         local can_afford = (inv_ref.money or 0) >= item.buy_price
         local state = (not can_afford) and "disabled" or
                       (is_hover_card and "hover" or "normal")
@@ -232,26 +279,22 @@ end
 -- ==========================================
 function draw_sell_tab()
     if not inv_ref or not plant_defs_ref then return end
-    local sw = love.graphics.getWidth()
     local ids = plant_defs_ref.get_all_ids()
 
-    local item_w, item_h = 190, 230
-    local cols = 3
-    local rows = math.ceil(#ids / cols)
-    local total_w = cols * (item_w + 20) - 20
-    local total_h = rows * (item_h + 20) - 20
-    local grid_x = (sw - total_w) / 2
-    local grid_y = 240
+    local grid_x, grid_y, item_w, item_h, cols, gap = compute_grid(#ids)
 
     buttons = {}
     for i, plant_id in ipairs(ids) do
         local data = plant_defs_ref.get(plant_id)
         local r = math.floor((i-1) / cols)
         local c = (i-1) % cols
-        local x = grid_x + c * (item_w + 20)
-        local y_base = grid_y + r * (item_h + 20)
+        local x = grid_x + c * (item_w + gap)
+        local y_base = grid_y + r * (item_h + gap)
         local is_hover_card = (hovered_button == i)
         local y = is_hover_card and (y_base - 4) or y_base
+
+        local btn_w, btn_h, btn_y, owned_y, price_y, name_y, icon_scale, icon_cy =
+            card_anchors(y, item_h)
 
         local owned = inv_ref.harvest[plant_id] or 0
         local has_stock = owned > 0
@@ -274,19 +317,20 @@ function draw_sell_tab()
         local icon_quad = _G.plant_icons and _G.plant_icons[plant_id] and _G.plant_icons[plant_id].harvest
         if icon_sheet and icon_quad then
             love.graphics.setColor(1, 1, 1, has_stock and 1 or 0.4)
-            love.graphics.draw(icon_sheet, icon_quad, x + item_w/2 - 30, y + 20, 0, 4, 4, 8, 8)
+            love.graphics.draw(icon_sheet, icon_quad, x + item_w/2, icon_cy,
+                0, icon_scale, icon_scale, 8, 8)
         end
 
         -- Nama tanaman
         love.graphics.setColor(has_stock and UITheme.colors.text or UITheme.colors.text_dim)
         love.graphics.setFont(UITheme.get_font(22))
-        love.graphics.printf(i18n.t(data.name_key), x, y + 100, item_w, "center")
+        love.graphics.printf(i18n.t(data.name_key), x, name_y, item_w, "center")
 
         -- Harga jual (dengan ikon koin mini)
-        UITheme.draw_coin_icon(x + item_w/2 - 32, y + 148, 6)
+        UITheme.draw_coin_icon(x + item_w/2 - 32, price_y + 10, 6)
         love.graphics.setColor(UITheme.colors.accent)
         love.graphics.setFont(UITheme.get_font(22))
-        love.graphics.printf("$" .. data.sell_price, x + item_w/2 - 20, y + 138, 60, "left")
+        love.graphics.printf("$" .. data.sell_price, x + item_w/2 - 20, price_y, 60, "left")
 
         -- Jumlah yang dimiliki (dengan badge bulat)
         if has_stock then
@@ -295,13 +339,11 @@ function draw_sell_tab()
         else
             love.graphics.setColor(UITheme.colors.text_dim)
             love.graphics.setFont(UITheme.get_font(18))
-            love.graphics.printf("x0", x, y + 165, item_w, "center")
+            love.graphics.printf("x0", x, owned_y, item_w, "center")
         end
 
         -- Tombol Jual (semua)
-        local btn_w, btn_h = 110, 40
         local btn_x = x + item_w/2 - btn_w/2
-        local btn_y = y + item_h - btn_h - 10
         local state = (not has_stock) and "disabled" or
                       (is_hover_card and "hover" or "normal")
         UITheme.draw_button_state(btn_x, btn_y, btn_w, btn_h,

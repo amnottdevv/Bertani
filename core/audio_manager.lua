@@ -9,15 +9,19 @@
 --   Audio.play_music("field", true)    -- mainkan musik loop
 --   Audio.stop_music()
 --
--- File audio dicari di:
---   audio/sfx/<name>.wav    (untuk SFX)
---   audio/music/<name>.ogg  (untuk musik)
+-- File audio dicari di (ext diprioritaskan sesuai urutan):
+--   audio/sfx/<name>.wav | .ogg | .mp3     (untuk SFX)
+--   audio/music/<name>.ogg | .mp3 | .wav   (untuk musik)
 --
 -- Bila file tidak ada, Audio akan diam (no error) supaya game tetap jalan
 -- walau asset audio belum lengkap.
 -- =============================================================
 
 local Audio = {}
+
+-- Urutan ekstensi yang dicoba (WAV dulu utk SFX karena umumnya pendek/statik)
+local SFX_EXTS   = { "wav", "ogg", "mp3" }
+local MUSIC_EXTS = { "ogg", "mp3", "wav" }
 
 -- ==========================================
 -- STATE INTERNAL
@@ -92,15 +96,27 @@ local function try_load(path, stream)
     return src
 end
 
+-- Cari path file audio pertama yang ada di antara daftar ekstensi.
+-- Return path, atau nil bila tak satu pun ada.
+local function find_path(dir, name, exts)
+    for _, ext in ipairs(exts) do
+        local p = dir .. name .. "." .. ext
+        if love.filesystem.getInfo(p) then return p end
+    end
+    return nil
+end
+
 -- Load semua SFX yang tersedia. Dipanggil sekali saat game start.
 local function preload_sfx()
     local sfx_names = {
         "plant", "harvest", "water", "buy", "sell",
         "error", "select", "refill", "save",
+        -- v2.2: scene bahaya (lihat docs/scene_danger_design.md §2.2)
+        "creepy", "monster_step", "caught", "wilt", "zone_hum",
     }
     for _, name in ipairs(sfx_names) do
-        local path = "audio/sfx/" .. name .. ".wav"
-        local src = try_load(path, false)
+        local path = find_path("audio/sfx/", name, SFX_EXTS)
+        local src = path and try_load(path, false)
         if src then
             sfx_sources[name] = src
         end
@@ -114,8 +130,8 @@ function Audio.play_sfx(name)
     if muted then return end
     if not sfx_sources[name] then
         -- Coba load on-demand (mungkin belum di-preload)
-        local path = "audio/sfx/" .. name .. ".wav"
-        local src = try_load(path, false)
+        local path = find_path("audio/sfx/", name, SFX_EXTS)
+        local src = path and try_load(path, false)
         if not src then return end   -- diam saja, bukan error fatal
         sfx_sources[name] = src
     end
@@ -138,12 +154,9 @@ function Audio.play_music(name, loop)
     Audio.stop_music()
 
     if not music_sources[name] then
-        local path = "audio/music/" .. name .. ".ogg"
-        local src = try_load(path, true)  -- stream untuk musik (irit memory)
-        if not src then
-            -- coba fallback .wav
-            src = try_load("audio/music/" .. name .. ".wav", true)
-        end
+        local path = find_path("audio/music/", name, MUSIC_EXTS)
+        -- stream untuk musik (irit memory)
+        local src = path and try_load(path, true)
         if not src then return end  -- diam saja
         music_sources[name] = src
     end
@@ -153,6 +166,15 @@ function Audio.play_music(name, loop)
     current_music:setVolume(music_volume)
     current_music:setLooping(loop ~= false)  -- default true
     current_music:play()
+end
+
+-- Status load (dipakai debug console & test otomatis).
+function Audio.has_sfx(name)
+    return sfx_sources[name] ~= nil
+end
+
+function Audio.has_music(name)
+    return music_sources[name] ~= nil
 end
 
 function Audio.stop_music()

@@ -87,6 +87,27 @@ function UITheme.pulse(speed, amp)
 end
 
 -- ==========================================
+-- SHAKE LAYAR (Stage 3 kejar-kejaran & Stage 4 zona merah)
+-- ==========================================
+-- Pulih "burst": selama `burst` detik pertama tiap `period`, offset getar
+-- ±amp piksel lalu mereda; sisanya diam. Murni fungsi (tanpa state) supaya
+-- aman dipanggil lintas modul dan bisa diuji.
+-- Pemakaian:
+--   local sx, sy = UITheme.get_shake(t, 6, 1.2, 0.35)
+--   love.graphics.push(); love.graphics.translate(sx, sy) ... pop()
+function UITheme.get_shake(time, amp, period, burst)
+    amp    = amp    or 6
+    period = period or 1.2
+    burst  = burst  or 0.35
+    local t = time % period
+    if t > burst then return 0, 0 end
+    local k = 1 - (t / burst)          -- peredaman linear: jolt lalu mereda
+    local phase = time * 37
+    return math.sin(phase) * amp * k,
+           math.cos(phase * 1.3) * amp * k * 0.6
+end
+
+-- ==========================================
 -- DEKORASI (dari gfx/objects/objects_01_16x16.png)
 -- ==========================================
 local decor_img = nil
@@ -420,9 +441,14 @@ end
 
 -- ==========================================
 -- BACKGROUND GRADASI SKY (langit biru -> horizon hijau)
+-- v2.2: cached ke Canvas — eliminasi 641 rect/frame
 -- + matahari lembut di pojok + parallax awan melayang
 -- ==========================================
 local clouds = nil
+local sky_canvas = nil
+local sky_canvas_w = 0
+local sky_canvas_h = 0
+
 local function init_clouds(w, h)
     clouds = {}
     for i = 1, 5 do
@@ -437,28 +463,55 @@ local function init_clouds(w, h)
 end
 
 function UITheme.draw_gradient_bg(screen_w, screen_h)
-    -- Gradasi 3-stop: langit biru atas -> langit pudar -> hijau rumput bawah
-    local c_top = UITheme.colors.bg_top
-    local c_mid = UITheme.colors.bg_mid
-    local c_bot = UITheme.colors.bg_bottom
-
-    local horizon_y = math.floor(screen_h * 0.55)
-    for y = 0, screen_h do
-        local r, g, b
-        if y < horizon_y then
-            local t = y / horizon_y
-            r = c_top[1] + (c_mid[1] - c_top[1]) * t
-            g = c_top[2] + (c_mid[2] - c_top[2]) * t
-            b = c_top[3] + (c_mid[3] - c_top[3]) * t
-        else
-            local t = (y - horizon_y) / (screen_h - horizon_y)
-            r = c_mid[1] + (c_bot[1] - c_mid[1]) * t
-            g = c_mid[2] + (c_bot[2] - c_mid[2]) * t
-            b = c_mid[3] + (c_bot[3] - c_mid[3]) * t
+    -- v2.2: bake sky gradient ke canvas sekali, reuse tiap frame (1 draw call)
+    if not sky_canvas or sky_canvas_w ~= screen_w or sky_canvas_h ~= screen_h then
+        sky_canvas = love.graphics.newCanvas(screen_w, screen_h)
+        local prev_canvas = love.graphics.getCanvas()
+        -- CATATAN: simpan canvas aktif dulu. setCanvas() tanpa argumen = balik
+        -- ke layar, jadi kalau fungsi ini dipanggil saat sedang render ke canvas
+        -- offscreen (screenshot / bake lain), sisa frame bocor ke layar.
+        love.graphics.setCanvas(sky_canvas)
+        love.graphics.clear()
+        local c_top = UITheme.colors.bg_top
+        local c_mid = UITheme.colors.bg_mid
+        local c_bot = UITheme.colors.bg_bottom
+        local horizon_y = math.floor(screen_h * 0.55)
+        -- Step 2 px supaya bake lebih cepat (setengah iterasi)
+        for y = 0, screen_h, 2 do
+            local r, g, b
+            if y < horizon_y then
+                local t = y / horizon_y
+                r = c_top[1] + (c_mid[1] - c_top[1]) * t
+                g = c_top[2] + (c_mid[2] - c_top[2]) * t
+                b = c_top[3] + (c_mid[3] - c_top[3]) * t
+            else
+                local t = (y - horizon_y) / (screen_h - horizon_y)
+                r = c_mid[1] + (c_bot[1] - c_mid[1]) * t
+                g = c_mid[2] + (c_bot[2] - c_mid[2]) * t
+                b = c_mid[3] + (c_bot[3] - c_mid[3]) * t
+            end
+            love.graphics.setColor(r, g, b, 1)
+            love.graphics.rectangle("fill", 0, y, screen_w, 2)
         end
-        love.graphics.setColor(r, g, b, 1)
-        love.graphics.rectangle("fill", 0, y, screen_w, 1)
+        -- Bukit rumput lembut di horizon
+        love.graphics.setColor(0.32, 0.60, 0.22, 0.85)
+        love.graphics.arc("fill", screen_w * 0.2, horizon_y + 40, 200, math.pi, 2*math.pi)
+        love.graphics.arc("fill", screen_w * 0.7, horizon_y + 30, 260, math.pi, 2*math.pi)
+        -- Garis kayu dekoratif atas & bawah
+        love.graphics.setColor(0.5, 0.3, 0.1, 1)
+        love.graphics.rectangle("fill", 0, 0, screen_w, 14)
+        love.graphics.rectangle("fill", 0, screen_h - 14, screen_w, 14)
+        love.graphics.setColor(0.75, 0.5, 0.2, 0.7)
+        love.graphics.rectangle("fill", 0, 14, screen_w, 2)
+        love.graphics.rectangle("fill", 0, screen_h - 16, screen_w, 2)
+        love.graphics.setCanvas(prev_canvas)
+        sky_canvas_w = screen_w
+        sky_canvas_h = screen_h
     end
+
+    -- Draw cached canvas (1 draw call instead of 641 rect fills)
+    love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.draw(sky_canvas, 0, 0)
 
     -- Matahari lembut di pojok kanan-atas
     local sun_x, sun_y = screen_w - 100, 90
@@ -471,21 +524,6 @@ function UITheme.draw_gradient_bg(screen_w, screen_h)
     for _, c in ipairs(clouds) do
         UITheme.draw_cloud(c.x, c.y, c.scale, c.alpha)
     end
-
-    -- Bukit rumput lembut di horizon
-    love.graphics.setColor(0.32, 0.60, 0.22, 0.85)
-    love.graphics.arc("fill", screen_w * 0.2, horizon_y + 40, 200, math.pi, 2*math.pi)
-    love.graphics.arc("fill", screen_w * 0.7, horizon_y + 30, 260, math.pi, 2*math.pi)
-
-    -- Garis kayu dekoratif atas & bawah
-    love.graphics.setColor(0.5, 0.3, 0.1, 1)
-    love.graphics.rectangle("fill", 0, 0, screen_w, 14)
-    love.graphics.rectangle("fill", 0, screen_h - 14, screen_w, 14)
-
-    -- Highlight tipis di bawah garis kayu atas
-    love.graphics.setColor(0.75, 0.5, 0.2, 0.7)
-    love.graphics.rectangle("fill", 0, 14, screen_w, 2)
-    love.graphics.rectangle("fill", 0, screen_h - 16, screen_w, 2)
 
     -- Vignette halus di sudut
     UITheme.draw_vignette(screen_w, screen_h, 0.35)
@@ -505,6 +543,10 @@ end
 
 function UITheme.resize_bg(w, h)
     clouds = nil
+    -- v2.2: invalidate cached sky canvas supaya re-bake saat resize
+    sky_canvas = nil
+    sky_canvas_w = 0
+    sky_canvas_h = 0
 end
 
 -- ==========================================
@@ -591,23 +633,41 @@ end
 
 -- ==========================================
 -- VIGNETTE — sudut layar lebih gelap, bikin fokus ke tengah
+-- v2.2: cached ke Canvas — eliminasi 72 rect/frame
 -- ==========================================
+local vignette_canvas = nil
+local vignette_w = 0
+local vignette_h = 0
+local vignette_intensity = 0
+
 function UITheme.draw_vignette(w, h, intensity)
     intensity = intensity or 0.4
-    local steps = 18
-    local max_r = math.sqrt(w*w + h*h) / 2
-    love.graphics.setColor(0, 0, 0, 0)
-    -- Lingkaran-lingkaran transparan di tepi untuk efek vignette
-    for i = 1, steps do
-        local t = i / steps
-        love.graphics.setColor(0, 0, 0, intensity * t * 0.25)
-        local inset = (1 - t) * 60
-        love.graphics.rectangle("fill", 0, 0, w, inset)              -- top
-        love.graphics.rectangle("fill", 0, h - inset, w, inset)      -- bottom
-        love.graphics.rectangle("fill", 0, 0, inset, h)             -- left
-        love.graphics.rectangle("fill", w - inset, 0, inset, h)      -- right
+    -- v2.2: bake vignette ke canvas sekali
+    if not vignette_canvas or vignette_w ~= w or vignette_h ~= h or vignette_intensity ~= intensity then
+        vignette_canvas = love.graphics.newCanvas(w, h)
+        local prev_canvas = love.graphics.getCanvas()
+        -- CATATAN: simpan canvas aktif dulu. setCanvas() tanpa argumen = balik
+        -- ke layar, jadi kalau fungsi ini dipanggil saat sedang render ke canvas
+        -- offscreen (screenshot / bake lain), sisa frame bocor ke layar.
+        love.graphics.setCanvas(vignette_canvas)
+        love.graphics.clear()
+        local steps = 18
+        for i = 1, steps do
+            local t = i / steps
+            love.graphics.setColor(0, 0, 0, intensity * t * 0.25)
+            local inset = (1 - t) * 60
+            love.graphics.rectangle("fill", 0, 0, w, inset)          -- top
+            love.graphics.rectangle("fill", 0, h - inset, w, inset)  -- bottom
+            love.graphics.rectangle("fill", 0, 0, inset, h)         -- left
+            love.graphics.rectangle("fill", w - inset, 0, inset, h)  -- right
+        end
+        love.graphics.setCanvas(prev_canvas)
+        vignette_w = w
+        vignette_h = h
+        vignette_intensity = intensity
     end
     love.graphics.setColor(1, 1, 1, 1)
+    love.graphics.draw(vignette_canvas, 0, 0)
 end
 
 -- ==========================================

@@ -17,9 +17,9 @@ local EntryStory = {}
 -- on_complete: function() dipanggil setelah scene selesai (fade out)
 function EntryStory.start(on_complete)
     libscene.start({
-        -- NPC di kiri (Mira - sementara pakai male_01_hat karena belum ada female sprite)
+        -- NPC di kiri (Mira - pakai sprite NPC baru)
         left = {
-            sprite = "gfx/characters/males/male_01/idle/male_01_hat_idle_32x32.png",
+            sprite = "gfx/characters/npc_mira.png",
             name   = i18n.t("entry.mira.name"),
         },
         -- Player di kanan (Leo - cowok tanpa topi)

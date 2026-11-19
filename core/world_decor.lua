@@ -21,6 +21,11 @@ local WorldDecor = {}
 
 local decor_data = nil
 
+-- v2.2: Cache gradient background ke Canvas (eliminasi 25 rect/frame)
+local bg_canvas = nil
+local bg_canvas_w = 0
+local bg_canvas_h = 0
+
 -- ==========================================
 -- SEEDED RNG (Lehmer LCG)
 -- ==========================================
@@ -35,13 +40,13 @@ end
 -- ==========================================
 -- DAY/NIGHT CYCLE
 -- ==========================================
--- Total cycle = 5 menit (300 detik):
---   00:00 - 02:00  PAGI   (fajar, langit pink-kuning)
---   02:00 - 04:30  SIANG  (cerah, penuh terang)
---   04:30 - 05:30  SORE   (golden hour, langit oranye-ungu)
---   05:30 - 07:00  MALAM  (gelap, bintang, kunang-kunang, jamur glow)
--- Lalu loop balik ke PAGI.
-local DAY_CYCLE_DURATION = 300   -- detik total
+-- Total cycle = 7 menit (420 detik) = jumlah durasi semua fase di bawah.
+-- fix bug 11: dulu DAY_CYCLE_DURATION = 300 padahal total fase 420 detik,
+-- sehingga t = cycle_time % 300 gak pernah menyentuh 330 (start night) ->
+-- fase MALAM tidak pernah tercapai (bintang/kunang-kunang/jamur glow gak
+-- muncul), dusk terpotong jadi 30 detik, dan debug "set_time night"
+-- juga gak berfungsi.
+local DAY_CYCLE_DURATION = 420   -- detik total (harus = jumlah duration PHASES)
 local PHASES = {
     { name = "dawn",  start = 0,    duration = 120, tint = { 1.00, 0.78, 0.65 } }, -- pink-kuning
     { name = "day",   start = 120,  duration = 150, tint = { 1.00, 1.00, 1.00 } }, -- netral
@@ -99,18 +104,25 @@ function WorldDecor.is_night()
 end
 
 function WorldDecor.get_night_alpha()
-    -- 0 di siang, 1 di tengah malam, smooth transition
+    -- v2.2: smooth night alpha tanpa discontinuity di boundary fase
+    -- night: full alpha (1.0), dengan ramp-in/ramp-out halus
+    -- dusk: ramp 0 → 1 di 30% akhir
+    -- dawn: ramp 1 → 0 di 30% awal
     local p = WorldDecor.get_phase()
     local prog = WorldDecor.get_phase_progress()
     if p.name == "night" then
-        -- peak di tengah malam
-        if prog < 0.2 then return prog / 0.2
-        elseif prog > 0.8 then return (1 - prog) / 0.2
+        -- full alpha sepanjang malam, ramp-in di awal & ramp-out di akhir
+        if prog < 0.1 then return prog / 0.1
+        elseif prog > 0.9 then return (1 - prog) / 0.1
         else return 1 end
-    elseif p.name == "dusk" and prog > 0.7 then
-        return (prog - 0.7) / 0.3
-    elseif p.name == "dawn" and prog < 0.3 then
-        return 1 - (prog / 0.3)
+    elseif p.name == "dusk" then
+        -- ramp dari 0 ke 1 di akhir dusk (70%-100%)
+        if prog > 0.7 then return (prog - 0.7) / 0.3 end
+        return 0
+    elseif p.name == "dawn" then
+        -- ramp dari 1 ke 0 di awal dawn (0%-30%)
+        if prog < 0.3 then return 1 - (prog / 0.3) end
+        return 0
     end
     return 0
 end
@@ -154,6 +166,22 @@ function WorldDecor.init(sw, sh, farm_rect, tile_size)
 
     local path_col_v = math.floor(cols / 2)
 
+    -- v2.2: pre-compute path tile array (bukan string-key map)
+    decor_data.path_tiles_array = {}
+    for x = 1, cols do
+        local seed_hash = (x * 73856093 + path_row * 19349663) % 4294967296
+        local r1 = (seed_hash % 100) / 100
+        table.insert(decor_data.path_tiles_array, { col = x, row = path_row, r1 = r1 })
+    end
+    for y = path_row, rows do
+        if y ~= path_row then  -- avoid duplicate (intersection)
+            local seed_hash = (path_col_v * 73856093 + y * 19349663) % 4294967296
+            local r1 = (seed_hash % 100) / 100
+            table.insert(decor_data.path_tiles_array, { col = path_col_v, row = y, r1 = r1 })
+        end
+    end
+    -- Simpan juga sebagai map untuk is_path() lookup
+    decor_data.path_tiles = {}
     for x = 1, cols do
         decor_data.path_tiles[x .. "," .. path_row] = "h"
     end
@@ -360,24 +388,41 @@ end
 
 -- ==========================================
 -- DRAW: background rumput (dengan tint day/night)
+-- v2.2: cached ke Canvas — eliminasi 25 rect/frame
 -- ==========================================
 function WorldDecor.draw_background(sw, sh)
     local tint = WorldDecor.get_world_tint()
     local night_a = WorldDecor.get_night_alpha()
 
-    -- Base rumput gradasi 2-tone
-    local c_top = { 0.18 * tint[1], 0.50 * tint[2], 0.18 * tint[3] }
-    local c_bot = { 0.10 * tint[1], 0.32 * tint[2], 0.10 * tint[3] }
-    local steps = 24
-    local step_h = sh / steps
-    for i = 0, steps do
-        local t = i / steps
-        local r = c_top[1] + (c_bot[1] - c_top[1]) * t
-        local g = c_top[2] + (c_bot[2] - c_top[2]) * t
-        local b = c_top[3] + (c_bot[3] - c_top[3]) * t
-        love.graphics.setColor(r, g, b, 1)
-        love.graphics.rectangle("fill", 0, i * step_h, sw, step_h + 1)
+    -- Bake canvas jika belum ada atau ukuran berubah
+    if not bg_canvas or bg_canvas_w ~= sw or bg_canvas_h ~= sh then
+        bg_canvas = love.graphics.newCanvas(sw, sh)
+        local prev_canvas = love.graphics.getCanvas()
+        -- CATATAN: simpan canvas aktif dulu. setCanvas() tanpa argumen = balik
+        -- ke layar, jadi kalau fungsi ini dipanggil saat sedang render ke canvas
+        -- offscreen (screenshot / bake lain), sisa frame bocor ke layar.
+        love.graphics.setCanvas(bg_canvas)
+        love.graphics.clear()
+        -- Gambar gradient PUTIH ke canvas (tint diterapkan saat draw)
+        local steps = 24
+        local step_h = sh / steps
+        for i = 0, steps do
+            local t = i / steps
+            -- Gradient hijau: atas terang, bawah gelap
+            local r = 0.18 + (0.10 - 0.18) * t
+            local g = 0.50 + (0.32 - 0.50) * t
+            local b = 0.18 + (0.10 - 0.18) * t
+            love.graphics.setColor(r, g, b, 1)
+            love.graphics.rectangle("fill", 0, i * step_h, sw, step_h + 1)
+        end
+        love.graphics.setCanvas(prev_canvas)
+        bg_canvas_w = sw
+        bg_canvas_h = sh
     end
+
+    -- Draw cached canvas dengan tint day/night
+    love.graphics.setColor(tint[1], tint[2], tint[3], 1)
+    love.graphics.draw(bg_canvas, 0, 0)
 
     -- Overlay malam: biru gelap di seluruh layar
     if night_a > 0.01 then
@@ -410,38 +455,34 @@ end
 
 -- ==========================================
 -- DRAW: jalanan tanah (dengan tint day/night)
+-- v2.2: pakai array pre-computed — eliminasi pairs() + string match per frame
 -- ==========================================
 function WorldDecor.draw_path(tile_size)
-    if not decor_data then return end
+    if not decor_data or not decor_data.path_tiles_array then return end
     local tint = WorldDecor.get_world_tint()
 
-    for key, kind in pairs(decor_data.path_tiles) do
-        local col, row = key:match("(%d+),(%d+)")
-        col = tonumber(col); row = tonumber(row)
-        if col and row then
-            local x = (col - 1) * tile_size
-            local y = (row - 1) * tile_size
+    for _, p in ipairs(decor_data.path_tiles_array) do
+        local x = (p.col - 1) * tile_size
+        local y = (p.row - 1) * tile_size
+        local r1 = p.r1
 
-            -- Tanah utama
-            love.graphics.setColor(0.55 * tint[1], 0.40 * tint[2], 0.22 * tint[3], 1)
-            love.graphics.rectangle("fill", x, y, tile_size, tile_size)
+        -- Tanah utama
+        love.graphics.setColor(0.55 * tint[1], 0.40 * tint[2], 0.22 * tint[3], 1)
+        love.graphics.rectangle("fill", x, y, tile_size, tile_size)
 
-            -- Variasi: hash sederhana
-            local seed_hash = (col * 73856093 + row * 19349663) % 4294967296
-            local r1 = (seed_hash % 100) / 100
-            love.graphics.setColor(0.48 * tint[1], 0.34 * tint[2], 0.18 * tint[3], 1)
-            love.graphics.circle("fill", x + r1 * tile_size, y + (1-r1) * tile_size, 6)
-            love.graphics.circle("fill", x + (1-r1) * tile_size, y + r1 * tile_size, 4)
+        -- Variasi blob
+        love.graphics.setColor(0.48 * tint[1], 0.34 * tint[2], 0.18 * tint[3], 1)
+        love.graphics.circle("fill", x + r1 * tile_size, y + (1-r1) * tile_size, 6)
+        love.graphics.circle("fill", x + (1-r1) * tile_size, y + r1 * tile_size, 4)
 
-            -- Kerikil
-            love.graphics.setColor(0.35 * tint[1], 0.25 * tint[2], 0.13 * tint[3], 1)
-            love.graphics.circle("fill", x + 12 + r1 * 30, y + 8 + r1 * 40, 1.5)
-            love.graphics.circle("fill", x + tile_size - 12 - r1 * 25, y + tile_size - 10 - r1 * 30, 1.5)
+        -- Kerikil
+        love.graphics.setColor(0.35 * tint[1], 0.25 * tint[2], 0.13 * tint[3], 1)
+        love.graphics.circle("fill", x + 12 + r1 * 30, y + 8 + r1 * 40, 1.5)
+        love.graphics.circle("fill", x + tile_size - 12 - r1 * 25, y + tile_size - 10 - r1 * 30, 1.5)
 
-            -- Highlight tengah
-            love.graphics.setColor(0.62 * tint[1], 0.46 * tint[2], 0.28 * tint[3], 0.4)
-            love.graphics.rectangle("fill", x + 4, y + 4, tile_size - 8, tile_size - 8)
-        end
+        -- Highlight tengah
+        love.graphics.setColor(0.62 * tint[1], 0.46 * tint[2], 0.28 * tint[3], 0.4)
+        love.graphics.rectangle("fill", x + 4, y + 4, tile_size - 8, tile_size - 8)
     end
     love.graphics.setColor(1, 1, 1, 1)
 end
@@ -701,6 +742,17 @@ function WorldDecor.get_time_string()
     elseif p.name == "night" then return "Night"
     end
     return "Day"
+end
+
+-- v2.2: Set phase manual (untuk debug console)
+-- phase: "dawn" | "day" | "dusk" | "night"
+function WorldDecor.set_phase(phase)
+    for _, p in ipairs(PHASES) do
+        if p.name == phase then
+            cycle_time = p.start + 1
+            return
+        end
+    end
 end
 
 return WorldDecor

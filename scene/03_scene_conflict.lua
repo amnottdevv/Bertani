@@ -24,7 +24,7 @@ local Scene3 = {}
 
 -- Path sprite (dipusatkan supaya gampang ganti)
 local SPRITE = {
-    mira  = "gfx/characters/males/male_01/idle/male_01_hat_idle_32x32.png",
+    mira  = "gfx/characters/npc_mira.png",  -- v2.2: pakai NPC baru
     rudi  = "gfx/characters/males/male_01/hoe/male_01_hoe_32x32_3frames.png",
     andri = "gfx/characters/males/male_01/idle/male_01_hat_idle_32x32.png",
     leo   = "gfx/characters/males/male_01/idle/male_01_idle_32x32.png",
@@ -106,7 +106,13 @@ start_robber_choice = function(on_complete)
                 start_give_money(on_complete)
             end
         end,
-        on_complete = function() end,  -- tidak dipanggil kalau ada choice
+        -- ESC/skip di step choice tetap memanggil on_complete (libscene.stop
+        -- selalu memanggilnya, hanya select_choice yang pakai stop(false)).
+        -- Kalau dibiarkan no-op, outcome tidak pernah ke-set dan main.lua
+        -- terjebak di state "scene" -> layar hitam permanen (fix bug 1).
+        on_complete = function()
+            if on_complete then on_complete("skipped") end
+        end,
     })
 end
 

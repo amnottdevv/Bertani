@@ -76,7 +76,7 @@ local scene_state = {
 local sprite_cache = {}
 
 -- ==========================================
--- HELPER: muat sprite 32x32
+-- HELPER: muat sprite (auto-detect 32x32 atau 20x20 sprite strip)
 -- ==========================================
 local function load_sprite(path)
     if sprite_cache[path] then
@@ -89,8 +89,21 @@ local function load_sprite(path)
     end
     local img = love.graphics.newImage(path)
     local w, h = img:getDimensions()
-    -- Asumsi sprite 32x32. Kalau lebih besar, ambil frame pertama 32x32.
-    local quad = love.graphics.newQuad(0, 0, 32, 32, w, h)
+    -- v2.2: Auto-detect sprite type
+    -- - 32x32 (single): ambil full
+    -- - 160x20 (sprite strip 8 frame): ambil frame 5 (front view) @ 20x20 dari x=80
+    -- - 192x128 (monks sheet): ambil cell (0,0) @ 32x32 = front view large monk
+    -- - Lainnya: ambil quad 32x32 dari kiri-atas
+    local quad
+    if h == 20 and w >= 80 then
+        -- Sprite strip 8 frame @ 20x20, ambil frame ke-5 (front-facing, idx 4)
+        quad = love.graphics.newQuad(4 * 20, 0, 20, 20, w, h)
+    elseif w == 192 and h == 128 then
+        -- Monks sheet, ambil cell (0,0) = front view large monk
+        quad = love.graphics.newQuad(0, 0, 32, 32, w, h)
+    else
+        quad = love.graphics.newQuad(0, 0, 32, 32, w, h)
+    end
     local sprite = { image = img, quad = quad, missing = false }
     sprite_cache[path] = sprite
     return sprite
@@ -182,6 +195,21 @@ function libscene.is_active()
 end
 
 -- ==========================================
+-- APAKAH LAGI MENUNGGU PILIHAN?
+-- ==========================================
+-- true saat dialog aktif, teks step selesai, dan step punya tombol pilihan.
+-- Penting sejak fix bug #12: "space" di kondisi ini berarti KONFIRMASI
+-- pilihan (bukan maju teks), jadi pemanggil wajib berhenti mem-bash space
+-- kalau belum mau memilih. Juga dipakai untuk prompt pilihan khusus
+-- (Stage 2: CEK/ENGGA).
+function libscene.is_awaiting_choice()
+    if not scene_state.active or scene_state.ending_card then return false end
+    local step = scene_state.steps[scene_state.current]
+    if not step or not step.choices then return false end
+    return scene_state.text_progress >= #step.text
+end
+
+-- ==========================================
 -- UPDATE
 -- ==========================================
 function libscene.update(dt)
@@ -236,6 +264,11 @@ function libscene.update(dt)
         scene_state.text_progress = scene_state.text_progress + scene_state.text_speed * dt
         if scene_state.text_progress > #step.text then
             scene_state.text_progress = #step.text
+        end
+        -- fix bug #12: teks selesai + step punya pilihan -> sorotan default
+        -- langsung aktif, supaya user keyboard melihat tombol yang akan dipilih
+        if scene_state.text_progress >= #step.text and step.choices then
+            scene_state.hovered_choice = scene_state.hovered_choice or 1
         end
 
         -- Mainkan SFX blip setiap 3 karakter baru
@@ -324,9 +357,15 @@ function libscene.draw()
         local is_speaking = (step.speaker == "left")
         local alpha = is_speaking and 1.0 or 0.45
         local bounce = is_speaking and (math.sin(love.timer.getTime() * 4) * 1.5) or 0
-        local scale = 8
-        local char_w = 32 * scale
-        local char_h = 32 * scale
+        -- v2.2: Auto-scale berdasarkan ukuran quad sprite biar tinggi sama
+        local qw, qh = 32, 32
+        if not scene_state.char_left.missing then
+            local vx, vy, vw, vh = scene_state.char_left.sprite.quad:getViewport()
+            qw, qh = vw, vh
+        end
+        local scale = 256 / qh   -- target tinggi 256 px konsisten
+        local char_w = qw * scale
+        local char_h = qh * scale
         local x = 80 + scene_state.slide_left
         local y = sh - char_h - 160 + bounce
 
@@ -356,9 +395,15 @@ function libscene.draw()
         local is_speaking = (step.speaker == "right")
         local alpha = is_speaking and 1.0 or 0.45
         local bounce = is_speaking and (math.sin(love.timer.getTime() * 4 + 1) * 1.5) or 0
-        local scale = 8
-        local char_w = 32 * scale
-        local char_h = 32 * scale
+        -- v2.2: Auto-scale berdasarkan ukuran quad sprite
+        local qw, qh = 32, 32
+        if not scene_state.char_right.missing then
+            local vx, vy, vw, vh = scene_state.char_right.sprite.quad:getViewport()
+            qw, qh = vw, vh
+        end
+        local scale = 256 / qh
+        local char_w = qw * scale
+        local char_h = qh * scale
         local x = sw - char_w - 80 - scene_state.slide_right
         local y = sh - char_h - 160 + bounce
 
@@ -465,6 +510,12 @@ function libscene.draw()
     love.graphics.setColor(1, 1, 1, 0.4)
     love.graphics.setFont(UITheme.get_font(18))
     love.graphics.printf(i18n.t("scene.skip_hint"), sw - 200, 20, 180, "right")
+    -- fix bug #12: hint navigasi keyboard saat pilihan tampil
+    -- (has_choices_visible cuma hidup di dalam blok "4. Dialog box",
+    --  jadi kondisinya dihitung ulang di sini)
+    if step and step.choices and scene_state.text_progress >= #step.text then
+        love.graphics.printf(i18n.t("scene.choice_hint"), sw - 240, 44, 220, "right")
+    end
 
     -- 6. Fade overlay (di paling atas)
     if scene_state.fade_phase == "in" then
@@ -508,12 +559,33 @@ function libscene.keypressed(key)
     end
 
     if key == "space" or key == "return" or key == "enter" then
-        -- Kalau step punya choices yang visible, jangan advance (harus klik tombol)
         local step = scene_state.steps[scene_state.current]
         if step and step.choices and scene_state.text_progress >= #step.text then
-            return true  -- konsumsi input, tapi gak advance
+            -- fix bug #12: papan ketik ikut memilih. Blok ini dulu cuma
+            -- "return true" (harus klik mouse), jadi user keyboard-only
+            -- mentok selamanya di dialog pilihan. Default = choice pertama.
+            libscene.select_choice(scene_state.hovered_choice or 1)
+            return true
         end
         libscene.advance()
+        return true
+    elseif key == "left" or key == "a" or key == "up" or key == "w"
+        or key == "right" or key == "d" or key == "down" or key == "s" then
+        -- fix bug #12: navigasi pilihan (wrap-around), mengikuti sorotan
+        -- yang sama dipakai hover mouse.
+        local step = scene_state.steps[scene_state.current]
+        if not (step and step.choices) then return false end
+        if scene_state.text_progress < #step.text then
+            libscene.advance()          -- teks belum selesai? selesaikan dulu
+        end
+        local n = #step.choices
+        if n > 0 then
+            local back  = (key == "left" or key == "a" or key == "up" or key == "w")
+            local cur   = scene_state.hovered_choice or 1
+            local delta = back and -1 or 1
+            scene_state.hovered_choice = ((cur - 1 + delta) % n) + 1
+            if _G.play_sfx then _G.play_sfx("select") end
+        end
         return true
     elseif key == "escape" then
         -- Skip seluruh scene
@@ -632,6 +704,10 @@ function libscene.advance()
     if scene_state.text_progress < #step.text then
         scene_state.text_progress = #step.text
         scene_state.last_blip_char = #step.text
+        -- fix bug #12: teks sengaja diselesaikan -> sorotan pilihan default
+        if step.choices then
+            scene_state.hovered_choice = scene_state.hovered_choice or 1
+        end
         return
     end
 
@@ -652,6 +728,8 @@ function libscene.advance()
     scene_state.current = scene_state.current + 1
     scene_state.text_progress = 0
     scene_state.last_blip_char = 0
+    -- fix bug #12: reset sorotan antar-step supaya tidak membawa index lama
+    scene_state.hovered_choice = nil
 end
 
 -- ==========================================
